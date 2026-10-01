@@ -63,6 +63,7 @@ def simulate_symbol(symbol: str, df: pd.DataFrame, p: StrategyParams, costs: Cos
         sl = entry - d * sl_d[i]
         tp = entry + d * tp_d[i]
         exit_px, reason, j = None, "", e_i
+        be_trigger = entry + d * p.breakeven_r * sl_d[i] if p.breakeven_r > 0 else None
         for j in range(e_i, n):
             hit_sl = l[j] <= sl if d == 1 else h[j] >= sl
             hit_tp = h[j] >= tp if d == 1 else l[j] <= tp
@@ -77,6 +78,10 @@ def simulate_symbol(symbol: str, df: pd.DataFrame, p: StrategyParams, costs: Cos
             if j - e_i + 1 >= p.max_hold_bars:
                 exit_px, reason = c[j], "TIME"
                 break
+            # 본전 손절: 이 봉에서 목표 수익에 닿았으면 다음 봉부터 손절을 본전(+왕복비용)으로
+            if be_trigger is not None and ((h[j] >= be_trigger) if d == 1 else (l[j] <= be_trigger)):
+                sl = entry * (1 + d * rt_cost)
+                be_trigger = None
         if exit_px is None:  # 데이터 끝
             exit_px, reason, j = c[n - 1], "END", n - 1
         gross = d * (exit_px - entry) / entry

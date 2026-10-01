@@ -59,3 +59,17 @@ def rolling_pct_rank(s: pd.Series, n: int) -> pd.Series:
         r[np.isnan(w).any(axis=1)] = np.nan
         out[n - 1:] = r
     return pd.Series(out, index=s.index)
+
+
+def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    """ADX: 추세 강도 (방향 무관). 보통 20~25 이상이면 추세장으로 본다."""
+    up = df["high"].diff()
+    dn = -df["low"].diff()
+    plus_dm = ((up > dn) & (up > 0)) * up
+    minus_dm = ((dn > up) & (dn > 0)) * dn
+    tr = atr(df, n)
+    a = 1.0 / n
+    plus_di = 100 * plus_dm.ewm(alpha=a, adjust=False, min_periods=n).mean() / tr
+    minus_di = 100 * minus_dm.ewm(alpha=a, adjust=False, min_periods=n).mean() / tr
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    return dx.ewm(alpha=a, adjust=False, min_periods=n).mean()

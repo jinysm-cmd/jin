@@ -72,6 +72,11 @@ class StrategyParams:
     # 진입 엔진: orderflow(위 3종 셋업) 또는 classic.ENGINES (pullback/macd/bollinger/rsi2/heikin).
     # 콤마로 여러 개 지정 가능 (예: "heikin,pullback,macd,rsi2"). 같은 봉에 겹치면 앞쪽이 우선.
     engine: str = "orderflow"
+    # 승률/손익 구조 조정 (실험용)
+    sl_mult: float = 1.0        # 손절폭 배수 (1.5 면 손절을 1.5배 넓게)
+    tp_mult: float = 1.0        # 익절폭 배수 (0.6 이면 익절을 더 가깝게)
+    adx_min: float = 0.0        # ADX 가 이 값 미만(추세 약함)이면 진입 안 함. 0=끔
+    breakeven_r: float = 0.0    # 수익이 이 R 만큼 나면 손절을 본전(수수료 포함)으로 올림. 0=끔
 
     def engines(self) -> list[str]:
         return [e.strip() for e in str(self.engine).split(",") if e.strip()]
@@ -169,9 +174,18 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
         put(sq_long, k, name, p.squeeze_sl_atr * a, p.squeeze_tp_atr * a)
         put(sq_short, -k, name, p.squeeze_sl_atr * a, p.squeeze_tp_atr * a)
 
+    sl = sl * p.sl_mult
+    tp = tp * p.tp_mult
+
     # 최소 손절폭/손익비 보정
     sl = np.maximum(sl, f["close"] * p.min_sl_pct).where(sig != 0)
     tp = np.maximum(tp, sl * p.min_rr).where(sig != 0)
+
+    # ADX 추세 강도 필터
+    if p.adx_min > 0:
+        weak = ind.adx(f, 14) < p.adx_min
+        sig[weak] = 0
+        setup[weak] = ""
 
     # EMA 추세 필터
     if p.trend_ema_len > 0:

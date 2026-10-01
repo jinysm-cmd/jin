@@ -107,3 +107,21 @@ def test_multi_engine_combines_signals():
     combo = generate_signals(df, StrategyParams(engine="heikin,macd"))
     assert ((combo.signal != 0) == (single["heikin"] | single["macd"])).all()
     assert set(combo.setup[combo.signal != 0]) <= {"HEIKIN", "MACD"}
+
+
+def test_winrate_knobs():
+    datasets = {f"S{i}": synthetic(n=8000, seed=i) for i in range(3)}
+
+    def run(**kw):
+        p = StrategyParams(engine="heikin,pullback", **kw)
+        tr = [t for s, df in datasets.items() for t in simulate_symbol(s, df, p, Costs())]
+        return pd.DataFrame([vars(t) for t in tr])
+
+    base = run()
+    near_tp = run(tp_mult=0.5, min_rr=0.3)
+    be = run(breakeven_r=0.5)
+    adx = run(adx_min=25)
+    win = lambda d: (d.gross_ret > 0).mean()
+    assert win(near_tp) > win(base)            # 익절이 가까우면 승률↑
+    assert (be.r_multiple < -0.5).sum() < (base.r_multiple < -0.5).sum()  # 본전손절로 큰 손실 수↓
+    assert len(adx) < len(base)                # ADX 필터로 진입↓

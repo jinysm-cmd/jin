@@ -193,6 +193,14 @@ class Trader:
                 reason = "TP"
             elif now_ms >= pos["expire_ms"]:
                 reason = "TIME"
+            be_r = self.params.breakeven_r
+            if not reason and be_r > 0 and not pos.get("be"):
+                risk = abs(pos["entry"] - pos.get("sl0", pos["sl"]))
+                if side * (px - pos["entry"]) >= be_r * risk:
+                    pos["sl"] = pos["entry"] * (1 + side * 0.0014)
+                    pos["be"] = True
+                    self._save()
+                    log.info("%s 수익 %.1fR 도달 → 손절을 본전(%.6g)으로 이동", sym, be_r, pos["sl"])
             if reason:
                 try:
                     fill = self.broker.close(sym, side, pos["qty"], px, pos["entry"])
@@ -257,7 +265,7 @@ class Trader:
         sl = fill - side * row["sl_dist"]
         tp = fill + side * row["tp_dist"]
         pos = {
-            "side": side, "qty": qty, "entry": fill, "sl": sl, "tp": tp, "setup": row["setup"],
+            "side": side, "qty": qty, "entry": fill, "sl": sl, "sl0": sl, "tp": tp, "setup": row["setup"],
             "entry_time": datetime.now(timezone.utc).isoformat(),
             "expire_ms": int(time.time() * 1000) + self.params.max_hold_bars * self.bar_ms,
         }
