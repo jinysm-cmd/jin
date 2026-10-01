@@ -86,3 +86,16 @@ def test_same_bar_exit_does_not_block_portfolio():
     tdf, _ = portfolio(trades, 0.005, 5, max_positions=10)
     assert len(tdf) == len(trades)
     assert (tdf.exit_time > tdf.entry_time).all()
+
+
+def test_classic_engines_no_lookahead():
+    from bot.classic import ENGINES
+
+    df = synthetic(seed=7)
+    for eng in ENGINES:
+        p = StrategyParams(engine=eng)
+        full = generate_signals(df, p)
+        part = generate_signals(df.iloc[:4000], p)
+        assert (full.signal != 0).sum() > 0, eng
+        assert set(full.setup[full.signal != 0]) == {eng.upper()}, eng
+        pd.testing.assert_series_equal(full.signal.iloc[:4000], part.signal, check_names=False)

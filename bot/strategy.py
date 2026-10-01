@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from . import classic
 from . import indicators as ind
 
 
@@ -68,6 +69,8 @@ class StrategyParams:
     min_rr: float = 1.3
     # 대표 지표 필터: EMA 추세 방향으로만 진입 (0 이면 끔). 예) 200 → 종가>EMA200 롱만, 종가<EMA200 숏만
     trend_ema_len: int = 0
+    # 진입 엔진: orderflow(위 3종 셋업) 또는 classic.ENGINES 중 하나 (pullback/macd/bollinger/rsi2/heikin)
+    engine: str = "orderflow"
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "StrategyParams":
@@ -77,7 +80,8 @@ class StrategyParams:
 
 
 def warmup_bars(p: StrategyParams) -> int:
-    return max(p.vol_z_len, p.squeeze_rank_len + p.squeeze_bb_len, p.vwap_len * 2, p.trend_ema_len) + 5
+    return max(p.vol_z_len, p.squeeze_rank_len + p.squeeze_bb_len, p.vwap_len * 2, p.trend_ema_len,
+               210 if p.engine != "orderflow" else 0) + 5
 
 
 def compute_features(df: pd.DataFrame, p: StrategyParams) -> pd.DataFrame:
@@ -123,8 +127,12 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
         sl[m] = sl_d[m] if isinstance(sl_d, pd.Series) else sl_d
         tp[m] = tp_d[m] if isinstance(tp_d, pd.Series) else tp_d
 
+    if p.engine != "orderflow":
+        classic.add_signals(f, p.engine, put)
+
+    of = p.engine == "orderflow"
     # 1) TRAP: 돌파 실패는 빠르게 움직이므로 최우선
-    if p.trap_enabled:
+    if of and p.trap_enabled:
         prev = f.shift(1)
         broke_up = (prev["high"] > prev["hh_trap"]) & (prev["imb"] > p.trap_imb) & (prev["vol_z"] > p.trap_vol_z)
         trap_short = broke_up & (f["close"] < prev["hh_trap"]) & (f["imb"] < 0)
@@ -139,7 +147,7 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
         put(trap_long, 1, "TRAP", sl_l, sl_l * p.trap_tp_r)
 
     # 2) ABSORB
-    if p.absorb_enabled:
+    if of and p.absorb_enabled:
         hot = f["vol_z"] > p.absorb_vol_z
         absorb_long = (f["dev_z"] < -p.dev_k) & hot & (f["imb"] < -p.absorb_imb) & (f["clv"] > p.absorb_clv)
         absorb_short = (f["dev_z"] > p.dev_k) & hot & (f["imb"] > p.absorb_imb) & (f["clv"] < 1 - p.absorb_clv)
@@ -147,7 +155,7 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
         put(absorb_short, -1, "ABSORB", p.absorb_sl_atr * a, p.absorb_tp_atr * a)
 
     # 3) SQUEEZE
-    if p.squeeze_enabled:
+    if of and p.squeeze_enabled:
         squeezed = f["bbw_rank"].shift(1) < p.squeeze_rank_max
         vol_ok = f["vol_z"] > p.squeeze_vol_z
         sq_long = squeezed & vol_ok & (f["close"] > f["hh_brk"]) & (f["imb"] > p.squeeze_imb) & (f["clv"] > 0.6)

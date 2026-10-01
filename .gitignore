@@ -9,3 +9,4 @@ backtest_trades.csv
 .pytest_cache/
 backtest_result.txt
 diagnose_result.*
+lab_result.*
