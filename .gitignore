@@ -7,3 +7,4 @@ logs/
 state*.json
 backtest_trades.csv
 .pytest_cache/
+backtest_result.txt
