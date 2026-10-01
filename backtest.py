@@ -4,6 +4,7 @@
   python backtest.py --days 120                       # config 의 심볼(auto=거래대금 상위)로 120일
   python backtest.py --symbols BTCUSDT,ETHUSDT,SOLUSDT --days 180
   python backtest.py --days 180 --optimize            # 앞 70% 로 파라미터 탐색 → 뒤 30% 로 검증
+  python backtest.py --interval 1h --days 365 --top 40 --set squeeze_mode=fade --set trap_enabled=false
   python backtest.py --vision-dir data/vision --symbols BTCUSDT   # data.binance.vision CSV 사용
 """
 import argparse
@@ -12,6 +13,7 @@ import logging
 import time
 
 import pandas as pd
+import yaml
 
 from bot.backtest_engine import Costs, breakdown, portfolio, simulate_symbol, summarize
 from bot.config import load_config
@@ -55,6 +57,22 @@ def print_report(title, tdf, curve):
         print(breakdown(tdf, "symbol").to_string())
 
 
+def print_split(tdf, frac=0.7):
+    """앞 70% / 뒤 30% 기간을 나눠서 성과가 둘 다 유지되는지 확인."""
+    if tdf.empty:
+        return
+    t0, t1 = tdf.entry_time.min(), tdf.entry_time.max()
+    cut = t0 + (t1 - t0) * frac
+    print("\n  [기간 분할 검증] 둘 다 avg_R 플러스여야 우연이 아닐 가능성이 높음")
+    for name, part in (("앞 70%", tdf[tdf.entry_time < cut]), ("뒤 30%", tdf[tdf.entry_time >= cut])):
+        if len(part):
+            w = part[part.pnl > 0].pnl.sum()
+            l = -part[part.pnl < 0].pnl.sum()
+            pf = round(w / l, 2) if l > 0 else float("inf")
+            print(f"    {name}: 거래 {len(part)}회, 승률 {(part.net_ret > 0).mean() * 100:.1f}%, "
+                  f"avg_R {part.r_multiple.mean():+.3f}, PF {pf}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
@@ -65,13 +83,25 @@ def main():
     ap.add_argument("--no-funding", action="store_true")
     ap.add_argument("--vision-dir", default=None)
     ap.add_argument("--out", default="backtest_trades.csv")
+    ap.add_argument("--top", type=int, default=None, help="거래대금 상위 N개 (config 의 top_n 대신)")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="전략 파라미터 덮어쓰기. 여러 번 사용 가능")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
     cfg = load_config(args.config)
     interval = args.interval or cfg["interval"]
     costs = Costs(**cfg.get("costs", {}))
+    for kv in args.set:
+        k, v = kv.split("=", 1)
+        if k not in StrategyParams.__dataclass_fields__:
+            raise SystemExit(f"알 수 없는 파라미터: {k}")
+        cfg.setdefault("strategy", {})[k] = yaml.safe_load(v)
+    if args.top:
+        cfg["universe"]["top_n"] = args.top
     params = StrategyParams.from_dict(cfg.get("strategy"))
+    if args.set:
+        print("파라미터 덮어쓰기:", ", ".join(args.set))
     client = BinanceFutures()
 
     if args.symbols:
@@ -97,6 +127,7 @@ def main():
     if not args.optimize:
         tdf, curve = run(datasets, fundings, params, cfg, costs)
         print_report(f"백테스트 {interval} / {len(datasets)}개 심볼", tdf, curve)
+        print_split(tdf)
         if not tdf.empty:
             tdf.to_csv(args.out, index=False)
             print(f"\n거래 내역 저장: {args.out}")

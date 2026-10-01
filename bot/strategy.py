@@ -51,6 +51,8 @@ class StrategyParams:
     trap_tp_r: float = 1.6
     # SQUEEZE
     squeeze_enabled: bool = True
+    # breakout: 돌파 방향 추종 / fade: 돌파 실패에 역베팅 (진단 결과 fade 쪽이 전 타임프레임에서 수수료 전 플러스)
+    squeeze_mode: str = "breakout"
     squeeze_bb_len: int = 20
     squeeze_rank_len: int = 120
     squeeze_rank_max: float = 0.20
@@ -150,8 +152,9 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
         vol_ok = f["vol_z"] > p.squeeze_vol_z
         sq_long = squeezed & vol_ok & (f["close"] > f["hh_brk"]) & (f["imb"] > p.squeeze_imb) & (f["clv"] > 0.6)
         sq_short = squeezed & vol_ok & (f["close"] < f["ll_brk"]) & (f["imb"] < -p.squeeze_imb) & (f["clv"] < 0.4)
-        put(sq_long, 1, "SQUEEZE", p.squeeze_sl_atr * a, p.squeeze_tp_atr * a)
-        put(sq_short, -1, "SQUEEZE", p.squeeze_sl_atr * a, p.squeeze_tp_atr * a)
+        k, name = (-1, "FADE") if p.squeeze_mode == "fade" else (1, "SQUEEZE")
+        put(sq_long, k, name, p.squeeze_sl_atr * a, p.squeeze_tp_atr * a)
+        put(sq_short, -k, name, p.squeeze_sl_atr * a, p.squeeze_tp_atr * a)
 
     # 최소 손절폭/손익비 보정
     sl = np.maximum(sl, f["close"] * p.min_sl_pct).where(sig != 0)
