@@ -186,6 +186,12 @@ class BinanceFutures:
     def set_leverage(self, symbol: str, leverage: int):
         return self._request("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}, signed=True)
 
+    def is_hedge_mode(self) -> bool:
+        return bool(self._request("GET", "/fapi/v1/positionSide/dual", signed=True).get("dualSidePosition"))
+
+    def set_one_way_mode(self):
+        self._request("POST", "/fapi/v1/positionSide/dual", {"dualSidePosition": "false"}, signed=True)
+
     def set_isolated(self, symbol: str):
         try:
             self._request("POST", "/fapi/v1/marginType", {"symbol": symbol, "marginType": "ISOLATED"}, signed=True)

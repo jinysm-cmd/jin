@@ -46,6 +46,18 @@ class LiveBroker:
         self.leverage = leverage
         self.exchange_stop = exchange_stop
         self._prepared: set[str] = set()
+        self._preflight()
+
+    def _preflight(self):
+        """봇은 단방향(One-way) 포지션 모드 기준으로 주문한다. 헤지 모드면 전환을 시도."""
+        if self.c.is_hedge_mode():
+            try:
+                self.c.set_one_way_mode()
+                log.info("포지션 모드를 헤지 → 단방향(One-way)으로 전환했습니다.")
+            except BinanceError as e:
+                raise SystemExit(
+                    f"계정이 헤지 모드인데 단방향 전환에 실패했습니다({e}). 열린 포지션/주문을 모두 정리한 뒤 "
+                    "바이낸스 선물 화면 → 설정(톱니바퀴) → 포지션 모드 → 단방향(One-way)으로 바꾸고 다시 실행하세요.")
 
     def balance(self) -> float:
         return self.c.balance_usdt()
@@ -53,7 +65,10 @@ class LiveBroker:
     def _prepare(self, symbol):
         if symbol in self._prepared:
             return
-        self.c.set_isolated(symbol)
+        try:
+            self.c.set_isolated(symbol)
+        except BinanceError as e:  # 멀티에셋 모드 등에서는 격리 마진 불가 → 교차 마진으로 진행
+            log.warning("%s 격리 마진 설정 실패, 현재 마진 방식으로 진행: %s", symbol, e)
         self.c.set_leverage(symbol, self.leverage)
         self._prepared.add(symbol)
 
@@ -160,6 +175,7 @@ class Trader:
     def manage_positions(self, marks: dict):
         now_ms = int(time.time() * 1000)
         ex_pos = self.broker.exchange_positions()
+        self._ex_pos = ex_pos or {}
         for sym, pos in list(self.state["positions"].items()):
             if ex_pos is not None and sym not in ex_pos:
                 log.info("%s 포지션이 거래소에서 이미 청산됨(비상손절/수동). 상태에서 제거.", sym)
@@ -208,6 +224,8 @@ class Trader:
                 break
             if sym in self.state["positions"] or self.state["cooldown"].get(sym, 0) > now.value // 1_000_000:
                 continue
+            if sym in getattr(self, "_ex_pos", {}):  # 직접(수동) 잡은 포지션이 있는 코인은 건드리지 않음
+                continue
             try:
                 df = self.client.klines(sym, self.interval, limit=min(1500, n_need))
             except BinanceError as e:
@@ -255,6 +273,9 @@ class Trader:
         log.info("모드=%s 인터벌=%s 시작. 상태파일=%s", self.mode, self.interval, self.state_path)
         if self.mode == "live":
             log.warning("!!! 실계좌 모드입니다. 손실 위험이 있습니다 !!!")
+        if self.mode != "paper":
+            log.info("연결 확인: USDT 잔고 %.2f, 거래소 보유 포지션 %s",
+                     self.broker.balance(), list((self.broker.exchange_positions() or {}).keys()) or "없음")
         while True:
             try:
                 self._refresh_universe()
