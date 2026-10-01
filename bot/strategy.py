@@ -69,8 +69,12 @@ class StrategyParams:
     min_rr: float = 1.3
     # 대표 지표 필터: EMA 추세 방향으로만 진입 (0 이면 끔). 예) 200 → 종가>EMA200 롱만, 종가<EMA200 숏만
     trend_ema_len: int = 0
-    # 진입 엔진: orderflow(위 3종 셋업) 또는 classic.ENGINES 중 하나 (pullback/macd/bollinger/rsi2/heikin)
+    # 진입 엔진: orderflow(위 3종 셋업) 또는 classic.ENGINES (pullback/macd/bollinger/rsi2/heikin).
+    # 콤마로 여러 개 지정 가능 (예: "heikin,pullback,macd,rsi2"). 같은 봉에 겹치면 앞쪽이 우선.
     engine: str = "orderflow"
+
+    def engines(self) -> list[str]:
+        return [e.strip() for e in str(self.engine).split(",") if e.strip()]
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "StrategyParams":
@@ -81,7 +85,7 @@ class StrategyParams:
 
 def warmup_bars(p: StrategyParams) -> int:
     return max(p.vol_z_len, p.squeeze_rank_len + p.squeeze_bb_len, p.vwap_len * 2, p.trend_ema_len,
-               210 if p.engine != "orderflow" else 0) + 5
+               210 if p.engines() != ["orderflow"] else 0) + 5
 
 
 def compute_features(df: pd.DataFrame, p: StrategyParams) -> pd.DataFrame:
@@ -127,10 +131,11 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
         sl[m] = sl_d[m] if isinstance(sl_d, pd.Series) else sl_d
         tp[m] = tp_d[m] if isinstance(tp_d, pd.Series) else tp_d
 
-    if p.engine != "orderflow":
-        classic.add_signals(f, p.engine, put)
+    for eng in p.engines():
+        if eng != "orderflow":
+            classic.add_signals(f, eng, put)
 
-    of = p.engine == "orderflow"
+    of = "orderflow" in p.engines()
     # 1) TRAP: 돌파 실패는 빠르게 움직이므로 최우선
     if of and p.trap_enabled:
         prev = f.shift(1)

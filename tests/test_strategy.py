@@ -99,3 +99,11 @@ def test_classic_engines_no_lookahead():
         assert (full.signal != 0).sum() > 0, eng
         assert set(full.setup[full.signal != 0]) == {eng.upper()}, eng
         pd.testing.assert_series_equal(full.signal.iloc[:4000], part.signal, check_names=False)
+
+
+def test_multi_engine_combines_signals():
+    df = synthetic(seed=8)
+    single = {e: (generate_signals(df, StrategyParams(engine=e)).signal != 0) for e in ("heikin", "macd")}
+    combo = generate_signals(df, StrategyParams(engine="heikin,macd"))
+    assert ((combo.signal != 0) == (single["heikin"] | single["macd"])).all()
+    assert set(combo.setup[combo.signal != 0]) <= {"HEIKIN", "MACD"}
