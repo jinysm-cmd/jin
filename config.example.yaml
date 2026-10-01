@@ -68,3 +68,4 @@ strategy:
   funding_block: 0.0005
   min_sl_pct: 0.004         # 손절폭 최소 0.4% (왕복 수수료+슬리피지 0.14% 가 0.35R 이하가 되도록)
   min_rr: 1.3
+  trend_ema_len: 0          # 200 으로 하면 EMA200 추세 방향으로만 진입

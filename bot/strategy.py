@@ -64,6 +64,8 @@ class StrategyParams:
     # 수수료 대비 손절폭이 너무 좁으면 수수료가 R 을 갉아먹음 → 최소 손절폭(가격 대비 %)과 최소 손익비
     min_sl_pct: float = 0.004
     min_rr: float = 1.3
+    # 대표 지표 필터: EMA 추세 방향으로만 진입 (0 이면 끔). 예) 200 → 종가>EMA200 롱만, 종가<EMA200 숏만
+    trend_ema_len: int = 0
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "StrategyParams":
@@ -73,7 +75,7 @@ class StrategyParams:
 
 
 def warmup_bars(p: StrategyParams) -> int:
-    return max(p.vol_z_len, p.squeeze_rank_len + p.squeeze_bb_len, p.vwap_len * 2) + 5
+    return max(p.vol_z_len, p.squeeze_rank_len + p.squeeze_bb_len, p.vwap_len * 2, p.trend_ema_len) + 5
 
 
 def compute_features(df: pd.DataFrame, p: StrategyParams) -> pd.DataFrame:
@@ -154,6 +156,13 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
     # 최소 손절폭/손익비 보정
     sl = np.maximum(sl, f["close"] * p.min_sl_pct).where(sig != 0)
     tp = np.maximum(tp, sl * p.min_rr).where(sig != 0)
+
+    # EMA 추세 필터
+    if p.trend_ema_len > 0:
+        ema = f["close"].ewm(span=p.trend_ema_len, adjust=False).mean()
+        against = ((sig == 1) & (f["close"] < ema)) | ((sig == -1) & (f["close"] > ema))
+        sig[against] = 0
+        setup[against] = ""
 
     # 펀딩비 필터: 롱이 과열(펀딩 높음)이면 롱 금지, 숏 과열이면 숏 금지
     if funding is not None and p.funding_block > 0:

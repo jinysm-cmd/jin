@@ -39,7 +39,8 @@ class Trade:
 
 
 def simulate_symbol(symbol: str, df: pd.DataFrame, p: StrategyParams, costs: Costs,
-                    funding: pd.Series | None = None, cooldown_bars: int = 3) -> list[Trade]:
+                    funding: pd.Series | None = None, cooldown_bars: int = 3, flip: bool = False) -> list[Trade]:
+    """flip=True 면 신호 방향을 반대로 뒤집어 시뮬레이션 (진단용)."""
     f = generate_signals(df, p, funding)
     o, h, l, c = (f[k].to_numpy() for k in ("open", "high", "low", "close"))
     sig = f["signal"].to_numpy()
@@ -56,7 +57,7 @@ def simulate_symbol(symbol: str, df: pd.DataFrame, p: StrategyParams, costs: Cos
         if sig[i] == 0:
             i += 1
             continue
-        d = int(sig[i])
+        d = -int(sig[i]) if flip else int(sig[i])
         e_i = i + 1
         entry = o[e_i]
         sl = entry - d * sl_d[i]

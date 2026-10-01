@@ -23,7 +23,7 @@ def top_symbols(client: BinanceFutures, top_n: int, min_quote_volume: float, exc
         f = filters.get(s)
         if not f or f["status"] != "TRADING" or f["contractType"] != "PERPETUAL" or f["quoteAsset"] != "USDT":
             continue
-        if s in excl:
+        if s in excl or not s.isascii():
             continue
         qv = float(t["quoteVolume"])
         if qv >= min_quote_volume:
@@ -81,3 +81,20 @@ def load_vision_dir(path: str, symbol: str, interval: str) -> pd.DataFrame:
     df = df.set_index("open_time")[["open", "high", "low", "close", "volume", "taker_buy_volume", "close_time"]]
     return df[~df.index.duplicated()].sort_index().astype(
         {c: float for c in ["open", "high", "low", "close", "volume", "taker_buy_volume"]})
+
+
+def read_cache(symbol: str, interval: str, cache_dir: str = "data") -> pd.DataFrame:
+    """backtest.py 가 받아둔 CSV 캐시를 네트워크 없이 읽는다."""
+    df = pd.read_csv(os.path.join(cache_dir, f"{symbol}_{interval}.csv"), index_col=0, parse_dates=["close_time"])
+    df.index = pd.to_datetime(df.index, utc=True)
+    df["close_time"] = pd.to_datetime(df["close_time"], utc=True)
+    return df
+
+
+def resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    """5분봉을 15분/1시간봉 등으로 합친다 (테이커 매수량도 합산)."""
+    out = df.resample(rule, label="left", closed="left").agg({
+        "open": "first", "high": "max", "low": "min", "close": "last",
+        "volume": "sum", "taker_buy_volume": "sum", "close_time": "last",
+    })
+    return out.dropna(subset=["open", "close"])
