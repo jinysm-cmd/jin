@@ -1,0 +1,70 @@
+# 복사해서 사용: cp config.example.yaml config.yaml
+#
+# mode
+#   paper   : 실제 바이낸스 시세로 돌리되 주문은 내지 않고 가상 체결 (API 키 불필요)  ← 처음엔 무조건 이걸로
+#   testnet : 바이낸스 선물 테스트넷에 실제 주문 (테스트넷 API 키 필요)
+#   live    : 실계좌 주문. 백테스트 + paper 검증 후에만 사용하세요.
+mode: paper
+
+# API 키는 파일에 적지 말고 환경변수로 넣으세요
+api_key_env: BINANCE_API_KEY
+api_secret_env: BINANCE_API_SECRET
+testnet_url: https://testnet.binancefuture.com
+
+interval: 5m
+
+# 거래 심볼: auto 면 24h 거래대금 상위 top_n 개 자동 선택
+symbols: auto
+universe:
+  top_n: 15
+  min_quote_volume: 100000000   # 1억 USDT 이상만 (유동성 부족 코인은 슬리피지로 수익이 사라짐)
+  exclude: []
+  refresh_hours: 6
+
+# 리스크
+leverage: 5                # 격리 마진 레버리지 (사이징은 risk_per_trade 가 결정, 레버리지는 증거금 한도용)
+risk_per_trade: 0.005      # 손절 시 계좌의 0.5% 손실
+max_positions: 4           # 동시 최대 포지션 수
+max_daily_loss: 0.03       # 하루(UTC) 손실 3% 도달 시 당일 신규 진입 중단
+cooldown_bars: 3           # 같은 심볼 청산 후 재진입 대기 봉 수
+paper_start_equity: 1000
+
+poll_seconds: 10           # 포지션 감시 주기
+exchange_stop: true        # testnet/live 에서 거래소 측 비상 손절 주문도 걸어둠
+
+# 백테스트 비용 가정
+costs:
+  fee: 0.0005
+  slippage: 0.0002
+
+# 전략 파라미터 (bot/strategy.py StrategyParams 참고)
+strategy:
+  atr_len: 14
+  vol_z_len: 96
+  max_hold_bars: 36
+  absorb_enabled: true
+  vwap_len: 48
+  dev_k: 2.0
+  absorb_vol_z: 1.8
+  absorb_imb: 0.12
+  absorb_clv: 0.55
+  absorb_sl_atr: 1.3
+  absorb_tp_atr: 2.0
+  trap_enabled: true
+  trap_lookback: 24
+  trap_imb: 0.15
+  trap_vol_z: 1.0
+  trap_sl_buffer_atr: 0.25
+  trap_tp_r: 1.6
+  squeeze_enabled: true
+  squeeze_bb_len: 20
+  squeeze_rank_len: 120
+  squeeze_rank_max: 0.20
+  squeeze_breakout_len: 24
+  squeeze_imb: 0.15
+  squeeze_vol_z: 1.2
+  squeeze_sl_atr: 1.2
+  squeeze_tp_atr: 3.0
+  funding_block: 0.0005
+  min_sl_pct: 0.004         # 손절폭 최소 0.4% (왕복 수수료+슬리피지 0.14% 가 0.35R 이하가 되도록)
+  min_rr: 1.3

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+config.yaml
+data/
+logs/
+state*.json
+backtest_trades.csv
+.pytest_cache/
