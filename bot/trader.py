@@ -277,6 +277,28 @@ class Trader:
                  sym, qty, fill, sl, tp)
 
     # ------------------------------------------------------------ 메인 루프
+    def maybe_scan(self, marks: dict, now_ms: int) -> bool:
+        """새 봉이 막 마감됐을 때만 신호를 확인한다.
+
+        봉 마감 후 한참 지나서(봇을 중간에 켰거나 재시작) 지난 신호로 진입하면 백테스트와 다른
+        가격에 들어가게 되므로, 마감 직후 일정 시간 안에만 스캔하고 그 외엔 다음 봉을 기다린다.
+        """
+        bar_open = now_ms // self.bar_ms * self.bar_ms  # 현재 진행 중인 봉 시작 = 직전 봉 마감
+        if bar_open <= self.last_bar_processed or now_ms - bar_open < 3000:  # 마감 3초 후 처리
+            return False
+        window = max(60_000, min(self.bar_ms // 4, 15 * 60_000))
+        scanned = now_ms - bar_open <= window
+        if scanned:
+            self.scan(marks)
+        else:
+            nxt = datetime.fromtimestamp((bar_open + self.bar_ms) / 1000).strftime("%H:%M")
+            log.info("직전 봉 마감 후 시간이 지나 이번 신호는 건너뜀. 다음 봉 마감(%s)부터 확인합니다.", nxt)
+        self.last_bar_processed = bar_open
+        self._save()
+        log.info("자산 %.2f USDT | 보유 %d개 %s", self.broker.balance(), len(self.state["positions"]),
+                 list(self.state["positions"]))
+        return scanned
+
     def run(self):
         log.info("모드=%s 인터벌=%s 시작. 상태파일=%s", self.mode, self.interval, self.state_path)
         if self.mode == "live":
@@ -289,15 +311,7 @@ class Trader:
                 self._refresh_universe()
                 marks = self._marks()
                 self.manage_positions(marks)
-                now_ms = int(time.time() * 1000)
-                bar_open = now_ms // self.bar_ms * self.bar_ms  # 현재 진행 중인 봉 시작 = 직전 봉 마감
-                if bar_open > self.last_bar_processed and now_ms - bar_open >= 3000:  # 마감 3초 후 처리
-                    self.scan(marks)
-                    self.last_bar_processed = bar_open
-                    self._save()
-                    eq = self.broker.balance()
-                    log.info("자산 %.2f USDT | 보유 %d개 %s", eq, len(self.state["positions"]),
-                             list(self.state["positions"]))
+                self.maybe_scan(marks, int(time.time() * 1000))
             except BinanceError as e:
                 log.error("API 오류: %s", e)
             except KeyboardInterrupt:

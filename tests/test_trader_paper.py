@@ -53,3 +53,22 @@ def test_paper_cycle(tmp_path, monkeypatch):
     t.manage_positions(marks)
     assert "AAAUSDT" not in t.state["positions"]
     assert t.state["trades"][-1]["reason"] == "SL"
+
+
+def test_late_start_skips_stale_signal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tr, "BinanceFutures", FakeClient)
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = yaml.safe_load(open(os.path.join(here, "config_4h.yaml"), encoding="utf-8"))
+    cfg["symbols"] = ["AAAUSDT"]
+    t = tr.Trader(cfg)
+    t._refresh_universe()
+    calls = []
+    t.scan = lambda marks: calls.append(1)
+    bar = 4 * 3600 * 1000
+    base = 1_000 * bar
+    assert t.maybe_scan({}, base + 3 * 3600 * 1000) is False   # 마감 3시간 뒤 시작 → 건너뜀
+    assert calls == []
+    assert t.maybe_scan({}, base + bar + 10_000) is True       # 다음 봉 마감 10초 뒤 → 스캔
+    assert calls == [1]
+    assert t.maybe_scan({}, base + bar + 60_000) is False      # 같은 봉 중복 스캔 없음
