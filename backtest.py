@@ -83,6 +83,7 @@ def main():
     ap.add_argument("--no-funding", action="store_true")
     ap.add_argument("--vision-dir", default=None)
     ap.add_argument("--out", default="backtest_trades.csv")
+    ap.add_argument("--risk", type=float, default=None, help="거래당 위험 (0.005=0.5%%). config 대신")
     ap.add_argument("--max-positions", type=int, default=None, help="동시 최대 포지션 수 (config 대신)")
     ap.add_argument("--top", type=int, default=None, help="거래대금 상위 N개 (config 의 top_n 대신)")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
@@ -102,6 +103,9 @@ def main():
         cfg["universe"]["top_n"] = args.top
     if args.max_positions:
         cfg["max_positions"] = args.max_positions
+    if args.risk:
+        cfg["risk_per_trade"] = args.risk
+    print(f"거래당 위험 {cfg['risk_per_trade'] * 100:g}% / 최대 포지션 {cfg['max_positions']}개")
     params = StrategyParams.from_dict(cfg.get("strategy"))
     if args.set:
         print("파라미터 덮어쓰기:", ", ".join(args.set))
