@@ -209,20 +209,44 @@ class BinanceFutures:
         """거래소 측 비상 손절(closePosition). 봇이 죽어도 포지션이 보호되도록 하는 안전망.
 
         바이낸스가 조건부 주문을 Algo Order API 로 옮기는 중이라, 일반 주문 엔드포인트가
-        거부하면(-4120 등) algoOrder 엔드포인트로 재시도한다.
+        거부하면(-4120) algoOrder 엔드포인트로 재시도한다.
+
+        반환값: 취소할 때 쓰는 참조 {"kind": "algo"|"order", "id": ...}
         """
         sp = self.round_price(symbol, stop_price)
+        if not getattr(self, "_algo_only", False):
+            try:
+                r = self._request("POST", "/fapi/v1/order", {
+                    "symbol": symbol, "side": close_side, "type": "STOP_MARKET", "stopPrice": sp,
+                    "closePosition": "true", "workingType": "MARK_PRICE",
+                }, signed=True)
+                return {"kind": "order", "id": r.get("orderId")}
+            except BinanceError as e:
+                if e.code != -4120:
+                    raise
+                log.info("이 계정은 손절 주문에 Algo Order API 를 사용합니다.")
+                self._algo_only = True
+        r = self._request("POST", "/fapi/v1/algoOrder", {
+            "algoType": "CONDITIONAL", "symbol": symbol, "side": close_side, "type": "STOP_MARKET",
+            "triggerPrice": sp, "closePosition": "true", "workingType": "MARK_PRICE",
+        }, signed=True)
+        return {"kind": "algo", "id": r.get("algoId")}
+
+    def cancel_protective_stop(self, symbol: str, ref: dict | None) -> bool:
+        """등록해 둔 비상 손절 주문 하나를 ID 로 취소. 이미 체결/취소된 경우도 True."""
+        if not ref or ref.get("id") is None:
+            return False
         try:
-            return self._request("POST", "/fapi/v1/order", {
-                "symbol": symbol, "side": close_side, "type": "STOP_MARKET", "stopPrice": sp,
-                "closePosition": "true", "workingType": "MARK_PRICE",
-            }, signed=True)
+            if ref["kind"] == "algo":
+                self._request("DELETE", "/fapi/v1/algoOrder", {"algoId": ref["id"]}, signed=True)
+            else:
+                self._request("DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": ref["id"]}, signed=True)
+            return True
         except BinanceError as e:
-            log.info("일반 STOP_MARKET 거부(%s) → Algo Order API 로 재시도", e)
-            return self._request("POST", "/fapi/v1/algoOrder", {
-                "algoType": "CONDITIONAL", "symbol": symbol, "side": close_side, "type": "STOP_MARKET",
-                "triggerPrice": sp, "closePosition": "true", "workingType": "MARK_PRICE",
-            }, signed=True)
+            if e.code in (-2011, -2013):  # 주문 없음(이미 체결/취소)
+                return True
+            log.warning("%s 비상손절 주문(%s) 취소 실패: %s", symbol, ref, e)
+            return False
 
     def cancel_all(self, symbol: str):
         for path in ("/fapi/v1/allOpenOrders", "/fapi/v1/algoOpenOrders"):

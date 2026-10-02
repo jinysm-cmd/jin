@@ -30,7 +30,7 @@ class PaperBroker:
         self.equity -= abs(qty) * fill * self.fee
         return fill
 
-    def close(self, symbol, side, qty, price, entry):
+    def close(self, symbol, side, qty, price, entry, stop_ref=None):
         fill = price * (1 - self.slip * side)
         self.equity -= abs(qty) * fill * self.fee
         self.equity += side * qty * (fill - entry)
@@ -74,6 +74,7 @@ class LiveBroker:
 
     def open(self, symbol, side, qty, price):
         self._prepare(symbol)
+        self.c.cancel_all(symbol)  # 이전 거래에서 남은 손절 주문이 새 포지션을 건드리지 않도록 정리
         r = self.c.market_order(symbol, "BUY" if side == 1 else "SELL", qty)
         avg = float(r.get("avgPrice") or 0) or price
         return avg
@@ -82,12 +83,16 @@ class LiveBroker:
         if not self.exchange_stop:
             return
         try:
-            self.c.place_protective_stop(symbol, "SELL" if side == 1 else "BUY", stop_price)
+            ref = self.c.place_protective_stop(symbol, "SELL" if side == 1 else "BUY", stop_price)
+            log.info("%s 거래소 비상손절 등록 완료 @%.6g (%s)", symbol, stop_price, ref)
+            return ref
         except BinanceError as e:
             log.warning("%s 거래소 비상손절 등록 실패 (봇 감시 손절은 동작): %s", symbol, e)
+            return None
 
-    def close(self, symbol, side, qty, price, entry):
+    def close(self, symbol, side, qty, price, entry, stop_ref=None):
         r = self.c.market_order(symbol, "SELL" if side == 1 else "BUY", qty, reduce_only=True)
+        self.c.cancel_protective_stop(symbol, stop_ref)
         self.c.cancel_all(symbol)
         return float(r.get("avgPrice") or 0) or price
 
@@ -203,7 +208,7 @@ class Trader:
                     log.info("%s 수익 %.1fR 도달 → 손절을 본전(%.6g)으로 이동", sym, be_r, pos["sl"])
             if reason:
                 try:
-                    fill = self.broker.close(sym, side, pos["qty"], px, pos["entry"])
+                    fill = self.broker.close(sym, side, pos["qty"], px, pos["entry"], pos.get("stop_ref"))
                 except BinanceError as e:
                     log.error("%s 청산 실패: %s", sym, e)
                     continue
@@ -272,7 +277,8 @@ class Trader:
         self.state["positions"][sym] = pos
         self._save()
         if isinstance(self.broker, LiveBroker):
-            self.broker.protect(sym, side, sl)
+            pos["stop_ref"] = self.broker.protect(sym, side, sl)
+            self._save()
         log.info("진입 %s %s %s qty=%s @%.6g  SL=%.6g TP=%.6g", row["setup"], "LONG" if side == 1 else "SHORT",
                  sym, qty, fill, sl, tp)
 
