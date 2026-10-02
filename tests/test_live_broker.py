@@ -97,3 +97,15 @@ def test_live_close_cancels_stop_and_open_clears_stale_orders():
     ref = b.protect("XUSDT", 1, 95)
     b.close("XUSDT", 1, 1.0, 105, 100, ref)
     assert ("cancel_stop", "XUSDT", {"kind": "algo", "id": 9}) in c.calls
+
+
+def test_actual_exit_from_user_trades():
+    c = FakeLive()
+    c.user_trades = lambda s, since: [
+        {"price": "100", "qty": "1", "realizedPnl": "0"},       # 진입 체결 (실현손익 0)
+        {"price": "110", "qty": "0.5", "realizedPnl": "5"},
+        {"price": "112", "qty": "0.5", "realizedPnl": "6"},
+    ]
+    b = LiveBroker(c, 5, True)
+    px, pnl = b.actual_exit("XUSDT", 0)
+    assert px == 111 and pnl == 11

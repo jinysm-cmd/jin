@@ -99,6 +99,19 @@ class LiveBroker:
     def exchange_positions(self):
         return self.c.positions()
 
+    def actual_exit(self, symbol: str, since_ms: int):
+        """거래소에서 (비상손절·수동 등으로) 청산된 경우 실제 체결가와 실현손익을 조회."""
+        try:
+            fills = [t for t in self.c.user_trades(symbol, since_ms) if float(t.get("realizedPnl", 0)) != 0]
+        except BinanceError as e:
+            log.warning("%s 체결 내역 조회 실패: %s", symbol, e)
+            return None, None
+        if not fills:
+            return None, None
+        qty = sum(float(t["qty"]) for t in fills)
+        px = sum(float(t["price"]) * float(t["qty"]) for t in fills) / qty
+        return px, sum(float(t["realizedPnl"]) for t in fills)
+
 
 class Trader:
     def __init__(self, cfg: dict):
@@ -188,7 +201,14 @@ class Trader:
         for sym, pos in list(self.state["positions"].items()):
             if ex_pos is not None and sym not in ex_pos:
                 log.info("%s 포지션이 거래소에서 이미 청산됨(비상손절/수동). 상태에서 제거.", sym)
-                self._record(sym, pos, pos["sl"], "EXCHANGE")
+                px, pnl = None, None
+                if isinstance(self.broker, LiveBroker):
+                    try:
+                        since = int(datetime.fromisoformat(pos["entry_time"]).timestamp() * 1000)
+                    except (KeyError, ValueError):
+                        since = now_ms - 7 * 86_400_000
+                    px, pnl = self.broker.actual_exit(sym, since)
+                self._record(sym, pos, px if px else pos["sl"], "EXCHANGE" if px else "EXCHANGE(추정)", pnl)
                 continue
             m = marks.get(sym)
             if not m:
@@ -218,8 +238,9 @@ class Trader:
                     continue
                 self._record(sym, pos, fill, reason)
 
-    def _record(self, sym, pos, exit_px, reason):
-        pnl = pos["side"] * pos["qty"] * (exit_px - pos["entry"])
+    def _record(self, sym, pos, exit_px, reason, pnl=None):
+        if pnl is None:
+            pnl = pos["side"] * pos["qty"] * (exit_px - pos["entry"])
         log.info("청산 %s %s %s @%.6g → %s  PnL(수수료 전)=%.2f USDT",
                  pos["setup"], "LONG" if pos["side"] == 1 else "SHORT", sym, exit_px, reason, pnl)
         self.state["trades"].append({**pos, "symbol": sym, "exit": exit_px, "reason": reason, "pnl": pnl,

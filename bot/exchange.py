@@ -183,6 +183,10 @@ class BinanceFutures:
                 out[p["symbol"]] = {"amt": amt, "entry": float(p["entryPrice"]), "mark": float(p["markPrice"])}
         return out
 
+    def user_trades(self, symbol: str, start_ms: int, limit: int = 100) -> list[dict]:
+        return self._request("GET", "/fapi/v1/userTrades",
+                             {"symbol": symbol, "startTime": start_ms, "limit": limit}, signed=True)
+
     def set_leverage(self, symbol: str, leverage: int):
         return self._request("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}, signed=True)
 
