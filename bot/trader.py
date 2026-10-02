@@ -174,6 +174,10 @@ class Trader:
         if dd <= -self.cfg["max_daily_loss"]:
             log.warning("일일 손실 한도 도달 (%.2f%%). 오늘은 신규 진입 중단.", dd * 100)
             return False
+        target = self.cfg.get("daily_profit_stop", 0) or 0
+        if target > 0 and dd >= target:
+            log.info("일일 목표 수익 달성 (+%.2f%%). 오늘은 신규 진입 중단.", dd * 100)
+            return False
         return True
 
     # ------------------------------------------------------------ 포지션 관리

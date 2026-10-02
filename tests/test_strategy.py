@@ -142,3 +142,22 @@ def test_signals_without_stop_distance_are_ignored():
     f.iloc[300, f.columns.get_loc("tp_dist")] = 2.0
     tr = simulate_signals("X", f, StrategyParams(), Costs())
     assert len(tr) == 1 and np.isfinite(tr[0].r_multiple)
+
+
+def test_fixed_tp_pct_and_daily_stops():
+    from bot.backtest_engine import Trade
+
+    df = synthetic(n=6000, seed=4)
+    f = generate_signals(df, StrategyParams(engine="heikin,pullback", tp_price_pct=0.006))
+    s = f[f.signal != 0]
+    assert np.allclose(s.tp_dist, s.close * 0.006)
+
+    t0 = pd.Timestamp("2026-01-01 00:00", tz="UTC")
+    mk = lambda h, sym, ret: Trade(sym, "X", 1, t0 + pd.Timedelta(hours=h), t0 + pd.Timedelta(hours=h + 1),
+                                   100, 100 * (1 + ret), 1.0, "TP", 1, ret, ret, ret / 0.01)
+    trades = [mk(0, "A", 0.02), mk(2, "B", 0.02), mk(4, "C", 0.02), mk(26, "D", 0.02)]
+    # 거래당 손절 1% → 명목가 50%, +2% 수익 → 계좌 +1% 씩
+    full, _ = portfolio(trades, 0.005, 5, 4)
+    capped, _ = portfolio(trades, 0.005, 5, 4, daily_profit_stop=0.015)
+    assert len(full) == 4
+    assert list(capped.symbol) == ["A", "B", "D"]   # +2% 도달 후 그날 C 는 건너뛰고, 다음날 D 는 진입

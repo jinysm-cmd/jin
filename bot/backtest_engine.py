@@ -104,8 +104,13 @@ def simulate_signals(symbol: str, f: pd.DataFrame, p: StrategyParams, costs: Cos
 
 
 def portfolio(trades: list[Trade], risk_per_trade: float, leverage: float, max_positions: int,
-              start_equity: float = 1000.0) -> tuple[pd.DataFrame, pd.Series]:
-    """모든 심볼 거래를 시간순으로 합쳐 동시 포지션 제한과 복리 사이징을 적용."""
+              start_equity: float = 1000.0, max_daily_loss: float = 0.0,
+              daily_profit_stop: float = 0.0) -> tuple[pd.DataFrame, pd.Series]:
+    """모든 심볼 거래를 시간순으로 합쳐 동시 포지션 제한과 복리 사이징을 적용.
+
+    max_daily_loss / daily_profit_stop: 하루(UTC) 실현손익이 -한도 이하 / +목표 이상이면
+    그날 신규 진입 중단 (0=끔). 라이브 봇과 같은 규칙.
+    """
     if not trades:
         return pd.DataFrame(), pd.Series(dtype=float)
     tdf = pd.DataFrame([asdict(t) for t in trades]).sort_values(["entry_time", "symbol"]).reset_index(drop=True)
@@ -121,10 +126,17 @@ def portfolio(trades: list[Trade], risk_per_trade: float, leverage: float, max_p
     accepted = np.zeros(len(tdf), dtype=bool)
     pnl = np.zeros(len(tdf))
     curve_t, curve_v = [], []
+    day, day_start = None, equity
     for t, _, kind, k in events:
         r = tdf.loc[k]
+        if t.date() != day:
+            day, day_start = t.date(), equity
         if kind == "in":
             if len(open_pos) >= max_positions or r.symbol in open_syms:
+                continue
+            day_ret = equity / day_start - 1
+            if (max_daily_loss > 0 and day_ret <= -max_daily_loss) or \
+                    (daily_profit_stop > 0 and day_ret >= daily_profit_stop):
                 continue
             frac = notional_fraction(r.entry, r.sl_dist, risk_per_trade, leverage, max_positions)
             open_pos[k] = frac * equity
