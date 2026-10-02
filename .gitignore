@@ -11,3 +11,4 @@ backtest_result.txt
 diagnose_result.*
 lab_result.*
 winrate_result.*
+ml_result.*

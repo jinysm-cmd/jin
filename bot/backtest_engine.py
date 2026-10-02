@@ -41,7 +41,15 @@ class Trade:
 def simulate_symbol(symbol: str, df: pd.DataFrame, p: StrategyParams, costs: Costs,
                     funding: pd.Series | None = None, cooldown_bars: int = 3, flip: bool = False) -> list[Trade]:
     """flip=True 면 신호 방향을 반대로 뒤집어 시뮬레이션 (진단용)."""
-    f = generate_signals(df, p, funding)
+    return simulate_signals(symbol, generate_signals(df, p, funding), p, costs, cooldown_bars, flip)
+
+
+def simulate_signals(symbol: str, f: pd.DataFrame, p: StrategyParams, costs: Costs,
+                     cooldown_bars: int = 3, flip: bool = False) -> list[Trade]:
+    """이미 계산된 신호 프레임(signal/setup/sl_dist/tp_dist 컬럼)으로 체결 시뮬레이션.
+
+    p 에서는 max_hold_bars, breakeven_r 만 사용한다.
+    """
     o, h, l, c = (f[k].to_numpy() for k in ("open", "high", "low", "close"))
     sig = f["signal"].to_numpy()
     sl_d, tp_d = f["sl_dist"].to_numpy(), f["tp_dist"].to_numpy()
