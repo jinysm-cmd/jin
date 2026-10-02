@@ -18,16 +18,20 @@ from bot.strategy import StrategyParams
 
 
 def variants(lev: float):
+    """이름: (전략 덮어쓰기, 하루 목표 중단, 고정 증거금 비율, 최대 포지션 수)"""
     roi = lambda r: r / lev  # ROI → 가격 변동
     return {
-        "기준(현재 설정)": ({}, 0),
-        "기준 + 하루 +3% 달성 시 중단": ({}, 0.03),
-        f"익절 ROI 3% (가격 {roi(0.03) * 100:.1f}%)": ({"tp_price_pct": roi(0.03)}, 0),
-        f"익절 ROI 4% (가격 {roi(0.04) * 100:.1f}%)": ({"tp_price_pct": roi(0.04)}, 0),
-        f"익절 ROI 4% + 하루 +3% 중단": ({"tp_price_pct": roi(0.04)}, 0.03),
-        "익절 가격 3%": ({"tp_price_pct": 0.03}, 0),
-        "익절 가격 4%": ({"tp_price_pct": 0.04}, 0),
-        "익절 가격 4% + 하루 +3% 중단": ({"tp_price_pct": 0.04}, 0.03),
+        "기준(현재 설정)": ({}, 0, 0, None),
+        "기준 + 하루 +3% 달성 시 중단": ({}, 0.03, 0, None),
+        f"익절 ROI 3% (가격 {roi(0.03) * 100:.1f}%)": ({"tp_price_pct": roi(0.03)}, 0, 0, None),
+        f"익절 ROI 4% (가격 {roi(0.04) * 100:.1f}%)": ({"tp_price_pct": roi(0.04)}, 0, 0, None),
+        "익절 ROI 4% + 하루 +3% 중단": ({"tp_price_pct": roi(0.04)}, 0.03, 0, None),
+        "익절 가격 3%": ({"tp_price_pct": 0.03}, 0, 0, None),
+        "익절 가격 4%": ({"tp_price_pct": 0.04}, 0, 0, None),
+        "익절 가격 4% + 하루 +3% 중단": ({"tp_price_pct": 0.04}, 0.03, 0, None),
+        "[요청안] 증거금10%x5종목 + ROI4% 익절": ({"tp_price_pct": roi(0.04)}, 0, 0.10, 5),
+        "[요청안] + 하루 +3% 중단": ({"tp_price_pct": roi(0.04)}, 0.03, 0.10, 5),
+        "증거금10%x5종목 + 기본 익절": ({}, 0, 0.10, 5),
     }
 
 
@@ -52,12 +56,13 @@ def main():
     print(f"\n{cfg['interval']} / {len(data)}개 코인 / 레버리지 {lev:g}배 / 모든 방법에 일일 손실 3% 중단 적용")
 
     rows = []
-    for name, (over, profit_stop) in variants(lev).items():
+    for name, (over, profit_stop, margin, max_pos) in variants(lev).items():
         p = StrategyParams.from_dict({**cfg.get("strategy", {}), **over})
         trades = [t for s, df in data.items()
                   for t in simulate_symbol(s, df, p, costs, cooldown_bars=cfg.get("cooldown_bars", 3))]
-        tdf, curve = portfolio(trades, cfg["risk_per_trade"], lev, cfg["max_positions"],
-                               max_daily_loss=cfg["max_daily_loss"], daily_profit_stop=profit_stop)
+        tdf, curve = portfolio(trades, cfg["risk_per_trade"], lev, max_pos or cfg["max_positions"],
+                               max_daily_loss=cfg["max_daily_loss"], daily_profit_stop=profit_stop,
+                               margin_per_trade=margin)
         st = summarize(tdf, curve)
         t0, t1 = tdf.entry_time.min(), tdf.entry_time.max()
         cut = t0 + (t1 - t0) * 0.7

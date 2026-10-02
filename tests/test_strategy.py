@@ -161,3 +161,15 @@ def test_fixed_tp_pct_and_daily_stops():
     capped, _ = portfolio(trades, 0.005, 5, 4, daily_profit_stop=0.015)
     assert len(full) == 4
     assert list(capped.symbol) == ["A", "B", "D"]   # +2% 도달 후 그날 C 는 건너뛰고, 다음날 D 는 진입
+
+
+def test_fixed_margin_sizing_and_roi_config(tmp_path):
+    import yaml
+    from bot.config import load_config
+
+    assert notional_fraction(100, 4, 0.005, 5, 5, margin_per_trade=0.10) == 0.5   # 증거금 10% x 5배
+    assert notional_fraction(100, 4, 0.005, 5, 5, margin_per_trade=0.30) == 1.0   # 5종목이면 20% 상한
+    cfg = {"leverage": 5, "take_profit_roi": 0.04, "strategy": {}}
+    p = tmp_path / "c.yaml"
+    p.write_text(yaml.safe_dump(cfg))
+    assert abs(load_config(str(p))["strategy"]["tp_price_pct"] - 0.008) < 1e-12

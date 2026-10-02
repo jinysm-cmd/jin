@@ -260,7 +260,8 @@ class Trader:
 
     def _enter(self, sym, side, row, marks, equity):
         px = float(marks[sym]["markPrice"]) if sym in marks else float(row["close"])
-        frac = notional_fraction(px, row["sl_dist"], self.cfg["risk_per_trade"], self.cfg["leverage"], self.cfg["max_positions"])
+        frac = notional_fraction(px, row["sl_dist"], self.cfg["risk_per_trade"], self.cfg["leverage"],
+                                 self.cfg["max_positions"], self.cfg.get("margin_per_trade", 0) or 0)
         qty = self.client.round_qty(sym, frac * equity / px)
         f = self.client.filters(sym)
         if qty < f["min_qty"] or qty * px < f["min_notional"]:
