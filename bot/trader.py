@@ -208,6 +208,9 @@ class Trader:
                     except (KeyError, ValueError):
                         since = now_ms - 7 * 86_400_000
                     px, pnl = self.broker.actual_exit(sym, since)
+                    # 수동 정리 등으로 포지션만 사라진 경우, 남은 비상손절 주문도 정리
+                    self.broker.c.cancel_protective_stop(sym, pos.get("stop_ref"))
+                    self.broker.c.cancel_all(sym)
                 self._record(sym, pos, px if px else pos["sl"], "EXCHANGE" if px else "EXCHANGE(추정)", pnl)
                 continue
             m = marks.get(sym)
