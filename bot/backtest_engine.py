@@ -62,8 +62,8 @@ def simulate_signals(symbol: str, f: pd.DataFrame, p: StrategyParams, costs: Cos
 
     i = 0
     while i < n - 1:
-        if sig[i] == 0:
-            i += 1
+        if sig[i] == 0 or not (np.isfinite(sl_d[i]) and sl_d[i] > 0 and np.isfinite(tp_d[i]) and tp_d[i] > 0):
+            i += 1  # 손절/익절 거리를 알 수 없는 신호(신규 상장 직후 등)는 무시
             continue
         d = -int(sig[i]) if flip else int(sig[i])
         e_i = i + 1

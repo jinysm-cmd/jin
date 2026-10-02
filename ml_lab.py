@@ -5,6 +5,7 @@
 - 4시간봉, 거래대금 상위 30개, 3년 데이터
 - 앞 50% 로 첫 학습 → 뒤 50% 를 4구간으로 나눠, 각 구간은 그 이전 데이터만으로 다시 학습해서 예측
 - 같은 뒤 50% 기간에서 현재 전략(하이킨아시+눌림목)과 성과 비교
+- 'AI 필터': 현재 전략 신호 중 AI 가 익절 확률을 높게 본 것만 진입
 - AUC: 모델의 예측력. 0.5 = 동전 던지기, 0.55 이상이면 의미 있는 예측력
 """
 import argparse
@@ -18,9 +19,11 @@ from bot.backtest_engine import Costs, portfolio, simulate_signals, simulate_sym
 from bot.config import load_config
 from bot.data import load_klines, top_symbols
 from bot.exchange import BinanceFutures
-from bot.strategy import StrategyParams
+from bot.strategy import StrategyParams, generate_signals
 
 THRESHOLDS = [0.40, 0.45, 0.50, 0.55]
+FILTER_THRESHOLDS = [0.30, 0.35, 0.40]  # 현재 전략 신호 중 AI 확률이 이 이상인 것만 진입
+WARMUP = 210  # 신규 상장 직후처럼 지표가 덜 계산된 봉은 제외
 
 
 def stats_row(name, tdf, curve):
@@ -79,6 +82,8 @@ def main():
             f = df.copy()
             pl, ps = z["p_long"].fillna(0), z["p_short"].fillna(0)
             sig = np.where((pl >= th) & (pl >= ps), 1, np.where(ps >= th, -1, 0))
+            sig[:WARMUP] = 0
+            sig[z["atr"].isna().to_numpy()] = 0
             f["signal"] = sig
             f["setup"] = np.where(sig != 0, "ML", "")
             sl = np.maximum(ml.SL_ATR * z["atr"], f["close"] * p.min_sl_pct)
@@ -88,6 +93,20 @@ def main():
         tdf, curve = portfolio(trades, cfg["risk_per_trade"], cfg["leverage"], cfg["max_positions"])
         rows.append(stats_row(f"AI 확률≥{th:.2f}", tdf, curve))
         print(f"  완료: AI 임계값 {th}")
+
+    for th in FILTER_THRESHOLDS:
+        trades = []
+        for s, df in data.items():
+            z = ds[ds.symbol == s].set_index("time").reindex(df.index)
+            f = generate_signals(df, p)
+            pl, ps = z["p_long"].fillna(0), z["p_short"].fillna(0)
+            keep = ((f["signal"] == 1) & (pl >= th)) | ((f["signal"] == -1) & (ps >= th))
+            f.loc[~keep, "signal"] = 0
+            trades += [t for t in simulate_signals(s, f, p, costs, cfg.get("cooldown_bars", 3))
+                       if t.entry_time >= test_start]
+        tdf, curve = portfolio(trades, cfg["risk_per_trade"], cfg["leverage"], cfg["max_positions"])
+        rows.append(stats_row(f"현재 전략 + AI필터≥{th:.2f}", tdf, curve))
+        print(f"  완료: 현재 전략 + AI 필터 {th}")
 
     base = [t for s, df in data.items()
             for t in simulate_symbol(s, df, p, costs, cooldown_bars=cfg.get("cooldown_bars", 3))

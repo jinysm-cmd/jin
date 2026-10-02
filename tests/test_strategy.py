@@ -125,3 +125,20 @@ def test_winrate_knobs():
     assert win(near_tp) > win(base)            # 익절이 가까우면 승률↑
     assert (be.r_multiple < -0.5).sum() < (base.r_multiple < -0.5).sum()  # 본전손절로 큰 손실 수↓
     assert len(adx) < len(base)                # ADX 필터로 진입↓
+
+
+def test_signals_without_stop_distance_are_ignored():
+    from bot.backtest_engine import simulate_signals
+
+    df = synthetic(n=500, seed=3)
+    f = df.copy()
+    f["signal"] = 0
+    f["setup"] = ""
+    f["sl_dist"] = np.nan
+    f["tp_dist"] = np.nan
+    f.iloc[100, f.columns.get_loc("signal")] = 1          # 손절거리 NaN → 무시
+    f.iloc[300, f.columns.get_loc("signal")] = 1
+    f.iloc[300, f.columns.get_loc("sl_dist")] = 1.0
+    f.iloc[300, f.columns.get_loc("tp_dist")] = 2.0
+    tr = simulate_signals("X", f, StrategyParams(), Costs())
+    assert len(tr) == 1 and np.isfinite(tr[0].r_multiple)
