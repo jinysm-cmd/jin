@@ -78,6 +78,7 @@ class StrategyParams:
     adx_min: float = 0.0        # ADX 가 이 값 미만(추세 약함)이면 진입 안 함. 0=끔
     breakeven_r: float = 0.0    # 수익이 이 R 만큼 나면 손절을 본전(수수료 포함)으로 올림. 0=끔
     tp_price_pct: float = 0.0   # 익절을 '가격 기준 고정 %'로 (0.03=가격 3%). 0=끔(ATR 기준 유지)
+    sl_price_pct: float = 0.0   # 손절을 '가격 기준 고정 %'로 (0.02=가격 2%). 0=끔(ATR 기준 유지)
 
     def engines(self) -> list[str]:
         return [e.strip() for e in str(self.engine).split(",") if e.strip()]
@@ -181,6 +182,10 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
     # 최소 손절폭/손익비 보정
     sl = np.maximum(sl, f["close"] * p.min_sl_pct).where(sig != 0)
     tp = np.maximum(tp, sl * p.min_rr).where(sig != 0)
+    if p.sl_price_pct > 0:  # 고정 % 손절
+        sl = (f["close"] * p.sl_price_pct).where(sig != 0)
+        if p.tp_price_pct <= 0:
+            tp = np.maximum(tp, sl * p.min_rr).where(sig != 0)
     if p.tp_price_pct > 0:  # 고정 % 익절 (손익비 보정 없이 그대로)
         tp = (f["close"] * p.tp_price_pct).where(sig != 0)
 

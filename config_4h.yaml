@@ -31,6 +31,8 @@ max_positions: 6           # 동시 최대 포지션 수
 margin_per_trade: 0
 # 바이낸스 앱 ROI(증거금 대비) 기준 익절. 0 이면 전략 기본 익절(ATR 기준), 0.04 = ROI 4%
 take_profit_roi: 0
+# 바이낸스 앱 ROI 기준 손절. 0 이면 전략 기본 손절(ATR 기준), 0.10 = ROI -10% 에서 손절
+stop_loss_roi: 0
 daily_profit_stop: 0        # 하루(UTC) 수익이 이 비율 이상이면 그날 신규 진입 중단 (0=끔, 0.03=3%)
 max_daily_loss: 0.03       # 하루(UTC) 손실 3% 도달 시 당일 신규 진입 중단
 cooldown_bars: 3           # 같은 심볼 청산 후 재진입 대기 봉 수

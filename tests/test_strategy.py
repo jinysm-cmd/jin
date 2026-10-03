@@ -173,3 +173,10 @@ def test_fixed_margin_sizing_and_roi_config(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text(yaml.safe_dump(cfg))
     assert abs(load_config(str(p))["strategy"]["tp_price_pct"] - 0.008) < 1e-12
+
+
+def test_fixed_sl_pct():
+    df = synthetic(n=6000, seed=6)
+    f = generate_signals(df, StrategyParams(engine="heikin,pullback", sl_price_pct=0.02, tp_price_pct=0.03))
+    s = f[f.signal != 0]
+    assert np.allclose(s.sl_dist, s.close * 0.02) and np.allclose(s.tp_dist, s.close * 0.03)
