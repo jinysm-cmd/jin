@@ -65,7 +65,7 @@ class FakeExchange:
 
     def _request(self, method, path, params=None, signed=False, retries=3):
         self.calls.append((method, path, dict(params or {})))
-        if method == "POST" and path == "/fapi/v1/order" and params.get("type") == "STOP_MARKET" and self.algo_only:
+        if method == "POST" and path == "/fapi/v1/order" and params.get("type") in ("STOP_MARKET", "TAKE_PROFIT_MARKET") and self.algo_only:
             raise BinanceError(400, -4120, "use algo")
         if path == "/fapi/v1/algoOrder" and method == "POST":
             return {"algoId": 777}
