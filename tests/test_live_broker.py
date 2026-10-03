@@ -109,3 +109,18 @@ def test_actual_exit_from_user_trades():
     b = LiveBroker(c, 5, True)
     px, pnl = b.actual_exit("XUSDT", 0)
     assert px == 111 and pnl == 11
+
+
+def test_take_profit_order_and_cancel_on_close():
+    fx = FakeExchange(algo_only=True)
+    ref = fx.bf.place_take_profit("XUSDT", "SELL", 110.0)
+    assert ref == {"kind": "algo", "id": 777}
+    post = [c for c in fx.calls if c[0] == "POST" and c[1] == "/fapi/v1/algoOrder"][-1]
+    assert post[2]["type"] == "TAKE_PROFIT_MARKET" and post[2]["closePosition"] == "true"
+
+    c = FakeLive()
+    cancelled = []
+    c.cancel_protective_stop = lambda s, r: cancelled.append(r) or True
+    b = LiveBroker(c, 5, True)
+    b.close("XUSDT", 1, 1.0, 105, 100, {"kind": "algo", "id": 1}, {"kind": "algo", "id": 2})
+    assert {"kind": "algo", "id": 1} in cancelled and {"kind": "algo", "id": 2} in cancelled

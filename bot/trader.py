@@ -30,7 +30,7 @@ class PaperBroker:
         self.equity -= abs(qty) * fill * self.fee
         return fill
 
-    def close(self, symbol, side, qty, price, entry, stop_ref=None):
+    def close(self, symbol, side, qty, price, entry, stop_ref=None, tp_ref=None):
         fill = price * (1 - self.slip * side)
         self.equity -= abs(qty) * fill * self.fee
         self.equity += side * qty * (fill - entry)
@@ -90,9 +90,21 @@ class LiveBroker:
             log.warning("%s 거래소 비상손절 등록 실패 (봇 감시 손절은 동작): %s", symbol, e)
             return None
 
-    def close(self, symbol, side, qty, price, entry, stop_ref=None):
+    def protect_tp(self, symbol, side, tp_price):
+        if not self.exchange_stop:
+            return None
+        try:
+            ref = self.c.place_take_profit(symbol, "SELL" if side == 1 else "BUY", tp_price)
+            log.info("%s 거래소 익절 주문 등록 완료 @%.6g (%s)", symbol, tp_price, ref)
+            return ref
+        except BinanceError as e:
+            log.warning("%s 거래소 익절 주문 등록 실패 (봇 감시 익절은 동작): %s", symbol, e)
+            return None
+
+    def close(self, symbol, side, qty, price, entry, stop_ref=None, tp_ref=None):
         r = self.c.market_order(symbol, "SELL" if side == 1 else "BUY", qty, reduce_only=True)
         self.c.cancel_protective_stop(symbol, stop_ref)
+        self.c.cancel_protective_stop(symbol, tp_ref)
         self.c.cancel_all(symbol)
         return float(r.get("avgPrice") or 0) or price
 
@@ -210,6 +222,7 @@ class Trader:
                     px, pnl = self.broker.actual_exit(sym, since)
                     # 수동 정리 등으로 포지션만 사라진 경우, 남은 비상손절 주문도 정리
                     self.broker.c.cancel_protective_stop(sym, pos.get("stop_ref"))
+                    self.broker.c.cancel_protective_stop(sym, pos.get("tp_ref"))
                     self.broker.c.cancel_all(sym)
                 self._record(sym, pos, px if px else pos["sl"], "EXCHANGE" if px else "EXCHANGE(추정)", pnl)
                 continue
@@ -235,7 +248,8 @@ class Trader:
                     log.info("%s 수익 %.1fR 도달 → 손절을 본전(%.6g)으로 이동", sym, be_r, pos["sl"])
             if reason:
                 try:
-                    fill = self.broker.close(sym, side, pos["qty"], px, pos["entry"], pos.get("stop_ref"))
+                    fill = self.broker.close(sym, side, pos["qty"], px, pos["entry"],
+                                             pos.get("stop_ref"), pos.get("tp_ref"))
                 except BinanceError as e:
                     log.error("%s 청산 실패: %s", sym, e)
                     continue
@@ -307,6 +321,7 @@ class Trader:
         self._save()
         if isinstance(self.broker, LiveBroker):
             pos["stop_ref"] = self.broker.protect(sym, side, sl)
+            pos["tp_ref"] = self.broker.protect_tp(sym, side, tp)
             self._save()
         log.info("진입 %s %s %s qty=%s @%.6g  SL=%.6g TP=%.6g", row["setup"], "LONG" if side == 1 else "SHORT",
                  sym, qty, fill, sl, tp)
@@ -339,8 +354,14 @@ class Trader:
         if self.mode == "live":
             log.warning("!!! 실계좌 모드입니다. 손실 위험이 있습니다 !!!")
         if self.mode != "paper":
+            ex_pos = self.broker.exchange_positions() or {}
             log.info("연결 확인: USDT 잔고 %.2f, 거래소 보유 포지션 %s",
-                     self.broker.balance(), list((self.broker.exchange_positions() or {}).keys()) or "없음")
+                     self.broker.balance(), list(ex_pos.keys()) or "없음")
+            # 이전 버전에서 진입해 거래소 익절 주문이 없는 포지션에 익절 주문 추가
+            for sym, pos in self.state["positions"].items():
+                if sym in ex_pos and not pos.get("tp_ref"):
+                    pos["tp_ref"] = self.broker.protect_tp(sym, pos["side"], pos["tp"])
+            self._save()
         while True:
             try:
                 self._refresh_universe()

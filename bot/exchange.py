@@ -209,7 +209,11 @@ class BinanceFutures:
             "reduceOnly": "true" if reduce_only else None, "newOrderRespType": "RESULT",
         }, signed=True)
 
-    def place_protective_stop(self, symbol: str, close_side: str, stop_price: float):
+    def place_take_profit(self, symbol: str, close_side: str, tp_price: float):
+        """거래소 측 익절(closePosition). 앱에서 보이고, 봇이 꺼져 있어도 익절된다."""
+        return self.place_protective_stop(symbol, close_side, tp_price, order_type="TAKE_PROFIT_MARKET")
+
+    def place_protective_stop(self, symbol: str, close_side: str, stop_price: float, order_type: str = "STOP_MARKET"):
         """거래소 측 비상 손절(closePosition). 봇이 죽어도 포지션이 보호되도록 하는 안전망.
 
         바이낸스가 조건부 주문을 Algo Order API 로 옮기는 중이라, 일반 주문 엔드포인트가
@@ -221,7 +225,7 @@ class BinanceFutures:
         if not getattr(self, "_algo_only", False):
             try:
                 r = self._request("POST", "/fapi/v1/order", {
-                    "symbol": symbol, "side": close_side, "type": "STOP_MARKET", "stopPrice": sp,
+                    "symbol": symbol, "side": close_side, "type": order_type, "stopPrice": sp,
                     "closePosition": "true", "workingType": "MARK_PRICE",
                 }, signed=True)
                 return {"kind": "order", "id": r.get("orderId")}
@@ -231,7 +235,7 @@ class BinanceFutures:
                 log.info("이 계정은 손절 주문에 Algo Order API 를 사용합니다.")
                 self._algo_only = True
         r = self._request("POST", "/fapi/v1/algoOrder", {
-            "algoType": "CONDITIONAL", "symbol": symbol, "side": close_side, "type": "STOP_MARKET",
+            "algoType": "CONDITIONAL", "symbol": symbol, "side": close_side, "type": order_type,
             "triggerPrice": sp, "closePosition": "true", "workingType": "MARK_PRICE",
         }, signed=True)
         return {"kind": "algo", "id": r.get("algoId")}
