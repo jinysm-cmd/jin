@@ -180,3 +180,14 @@ def test_fixed_sl_pct():
     f = generate_signals(df, StrategyParams(engine="heikin,pullback", sl_price_pct=0.02, tp_price_pct=0.03))
     s = f[f.signal != 0]
     assert np.allclose(s.sl_dist, s.close * 0.02) and np.allclose(s.tp_dist, s.close * 0.03)
+
+
+def test_tp_cap_to_recent_high():
+    df = synthetic(n=6000, seed=9)
+    base = generate_signals(df, StrategyParams(engine="heikin,pullback"))
+    cap = generate_signals(df, StrategyParams(engine="heikin,pullback", tp_cap_bars=120))
+    assert (cap.signal != 0).sum() <= (base.signal != 0).sum()
+    s = cap[cap.signal == 1]
+    hh = df["high"].rolling(120).max().reindex(s.index)
+    assert (s.close + s.tp_dist <= hh + 1e-9).all()          # 익절가가 최근 고점을 넘지 않음
+    assert (s.tp_dist >= s.sl_dist * 1.0 - 1e-9).all()       # 손익비 1 미만은 진입 안 함

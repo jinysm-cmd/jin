@@ -79,6 +79,10 @@ class StrategyParams:
     breakeven_r: float = 0.0    # 수익이 이 R 만큼 나면 손절을 본전(수수료 포함)으로 올림. 0=끔
     tp_price_pct: float = 0.0   # 익절을 '가격 기준 고정 %'로 (0.03=가격 3%). 0=끔(ATR 기준 유지)
     sl_price_pct: float = 0.0   # 손절을 '가격 기준 고정 %'로 (0.02=가격 2%). 0=끔(ATR 기준 유지)
+    # 저항 고려 익절: 익절가가 최근 N봉 고점(숏은 저점)을 넘으면 그 가격까지로 낮춤. 0=끔
+    tp_cap_bars: int = 0
+    tp_cap_min_rr: float = 1.0  # 낮춘 뒤 익절폭이 손절폭의 이 배수보다 작으면
+    tp_cap_skip: bool = True    #   True: 진입 안 함 / False: 이 배수까지는 익절폭 유지
 
     def engines(self) -> list[str]:
         return [e.strip() for e in str(self.engine).split(",") if e.strip()]
@@ -188,6 +192,20 @@ def generate_signals(df: pd.DataFrame, p: StrategyParams, funding: pd.Series | N
             tp = np.maximum(tp, sl * p.min_rr).where(sig != 0)
     if p.tp_price_pct > 0:  # 고정 % 익절 (손익비 보정 없이 그대로)
         tp = (f["close"] * p.tp_price_pct).where(sig != 0)
+
+    if p.tp_cap_bars > 0:  # 최근 고점/저점(저항/지지)까지로 익절 제한
+        room_up = f["high"].rolling(p.tp_cap_bars).max() - f["close"]
+        room_dn = f["close"] - f["low"].rolling(p.tp_cap_bars).min()
+        room = pd.Series(np.where(sig == 1, room_up, room_dn), index=f.index)
+        capped = np.minimum(tp, room)
+        too_small = (sig != 0) & (capped < sl * p.tp_cap_min_rr)
+        if p.tp_cap_skip:
+            sig[too_small] = 0
+            setup[too_small] = ""
+            tp = capped
+        else:
+            tp = np.maximum(capped, sl * p.tp_cap_min_rr)
+        tp = tp.where(sig != 0)
 
     # ADX 추세 강도 필터
     if p.adx_min > 0:
