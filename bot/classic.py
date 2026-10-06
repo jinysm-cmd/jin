@@ -6,11 +6,13 @@ strategy.generate_signals 에서 StrategyParams.engine 으로 선택:
   bollinger : 볼린저 하단 밖으로 나갔다가 다시 안으로 들어오며 RSI 과매도 → 중심선까지 반등 노림
   rsi2      : 래리 코너스 RSI(2) - EMA200 위에서 RSI(2)<10 극단 과매도 매수
   heikin    : 하이킨아시 음봉 3개 이상 후 아래꼬리 없는 강한 양봉 전환 + EMA200 추세 방향
+  box       : 박스권 돌파 - 최근 20봉 고저폭이 ATR 4배 이하(횡보)였다가 거래량 1.5배 이상 동반 돌파.
+              손절 = 박스 중간, 익절 = 박스 높이만큼(측정 이동)
 """
 import numpy as np
 import pandas as pd
 
-ENGINES = ["pullback", "macd", "bollinger", "rsi2", "heikin"]
+ENGINES = ["pullback", "macd", "bollinger", "rsi2", "heikin", "box"]
 
 
 def ema(s, n):
@@ -85,6 +87,19 @@ def add_signals(f: pd.DataFrame, engine: str, put) -> None:
         strong_bear = bear & ((hh - ho) <= tol)   # 위꼬리 없음
         put(red3 & strong_bull & (c > e200), 1, "HEIKIN", 1.5 * a, 3.0 * a)
         put(green3 & strong_bear & (c < e200), -1, "HEIKIN", 1.5 * a, 3.0 * a)
+
+    elif engine == "box":
+        n = 20
+        top = h.rolling(n).max().shift(1)
+        bot = l.rolling(n).min().shift(1)
+        height = top - bot
+        boxed = height <= 4.0 * a.shift(1)                      # 직전 20봉이 좁은 범위(박스)
+        vol_ok = f["volume"] > 1.5 * f["volume"].rolling(n).mean().shift(1)
+        mid = (top + bot) / 2
+        long_ = boxed & vol_ok & (c > top) & (c.shift(1) <= top)
+        short = boxed & vol_ok & (c < bot) & (c.shift(1) >= bot)
+        put(long_, 1, "BOX", (c - mid).clip(lower=0.5 * a), height)
+        put(short, -1, "BOX", (mid - c).clip(lower=0.5 * a), height)
 
     else:
         raise ValueError(f"알 수 없는 engine: {engine} (가능: orderflow, {', '.join(ENGINES)})")
