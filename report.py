@@ -18,6 +18,7 @@ import pandas as pd
 
 from bot.config import load_config
 from bot.exchange import BinanceFutures
+from bot.trader import exit_reason
 
 EXPECT = {"승률%": "약 40%", "거래당 R": "약 +0.06 ~ +0.13", "하루 거래": "약 1~2회"}
 
@@ -30,6 +31,17 @@ def risk_of(t: dict) -> float:
         return float("nan")
 
 
+def reason_of(t: dict) -> str:
+    """예전 기록의 'EXCHANGE' 를 청산가 기준으로 TP/SL/수동·기타로 다시 분류."""
+    r = t.get("reason")
+    if r == "EXCHANGE":
+        try:
+            return exit_reason(t, float(t["exit"]))
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            return r
+    return r
+
+
 def bot_trades(state: dict) -> pd.DataFrame:
     rows = []
     for t in state.get("trades", []):
@@ -38,7 +50,7 @@ def bot_trades(state: dict) -> pd.DataFrame:
             "청산시각": t.get("exit_time", "")[:16].replace("T", " "),
             "코인": t.get("symbol"), "전략": t.get("setup"),
             "방향": "롱" if t.get("side") == 1 else "숏",
-            "진입가": t.get("entry"), "청산가": t.get("exit"), "사유": t.get("reason"),
+            "진입가": t.get("entry"), "청산가": t.get("exit"), "사유": reason_of(t),
             "손익USDT": round(float(t.get("pnl", 0)), 2),
             "R": round(float(t.get("pnl", 0)) / r, 2) if r and r == r else None,
         })

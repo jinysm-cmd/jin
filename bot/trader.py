@@ -15,6 +15,18 @@ from .strategy import StrategyParams, generate_signals, warmup_bars
 log = logging.getLogger("trader")
 
 
+
+def exit_reason(pos: dict, px):
+    """거래소에서 닫힌 포지션의 청산가로 사유 추정: 익절/손절 주문가 근처면 TP/SL, 아니면 수동/기타."""
+    if not px:
+        return "EXCHANGE(추정)"
+    if abs(px - pos["tp"]) / pos["tp"] <= 0.004:
+        return "TP"
+    sl0 = pos.get("sl0", pos["sl"])
+    if abs(px - sl0) / sl0 <= 0.006 or abs(px - pos["sl"]) / pos["sl"] <= 0.006:
+        return "SL"
+    return "수동/기타"
+
 class PaperBroker:
     """주문을 실제로 내지 않고 시세 기준으로 가상 체결."""
 
@@ -224,7 +236,7 @@ class Trader:
                     self.broker.c.cancel_protective_stop(sym, pos.get("stop_ref"))
                     self.broker.c.cancel_protective_stop(sym, pos.get("tp_ref"))
                     self.broker.c.cancel_all(sym)
-                self._record(sym, pos, px if px else pos["sl"], "EXCHANGE" if px else "EXCHANGE(추정)", pnl)
+                self._record(sym, pos, px if px else pos["sl"], exit_reason(pos, px), pnl)
                 continue
             m = marks.get(sym)
             if not m:
