@@ -187,6 +187,20 @@ class BinanceFutures:
         return self._request("GET", "/fapi/v1/userTrades",
                              {"symbol": symbol, "startTime": start_ms, "limit": limit}, signed=True)
 
+    def income(self, start_ms: int, end_ms: int) -> list[dict]:
+        """실현손익·수수료·펀딩비 내역 (REALIZED_PNL / COMMISSION / FUNDING_FEE 등)."""
+        rows, cur = [], start_ms
+        while cur < end_ms:
+            data = self._request("GET", "/fapi/v1/income",
+                                 {"startTime": cur, "endTime": end_ms, "limit": 1000}, signed=True)
+            if not data:
+                break
+            rows.extend(data)
+            if len(data) < 1000:
+                break
+            cur = int(data[-1]["time"]) + 1
+        return rows
+
     def set_leverage(self, symbol: str, leverage: int):
         return self._request("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}, signed=True)
 
