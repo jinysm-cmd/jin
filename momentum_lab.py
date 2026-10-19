@@ -8,7 +8,12 @@
   롱숏  : 상위 k개 매수 + 하위 k개 매도 (시장 방향 중립)
 총 노출 = 자본 x1 (레버리지 1배 상당). 교체 시 수수료+슬리피지 0.07% 반영. 펀딩비는 미반영.
 앞 70% / 뒤 30% 기간이 모두 플러스여야 통과.
-주의: 오늘 기준 상위 코인으로 과거를 돌리므로(생존 편향) 실제보다 좋게 나올 수 있다.
+
+편향 점검: '오늘 거래대금 상위'로 과거를 돌리면, 최근에 폭등해서 상위에 올라온 코인을 미리 알고 고르는 셈이 된다.
+그래서 두 가지로 돌린다.
+  [A] 오늘 기준 상위 코인 (편향 있음, 참고용)
+  [B] 그 시점 기준 상위 코인 - 넓게(상위 100) 받아두고, 매 교체일마다 '그날까지 30일 평균 거래대금'
+      상위 30개 중 상장 60일 이상만 대상. 롱 포지션은 펀딩비(하루 0.03%)도 비용으로 뺀다.  ← 이걸로 판단
 """
 import argparse
 import logging
@@ -21,11 +26,15 @@ from bot.data import load_klines, top_symbols
 from bot.exchange import BinanceFutures
 
 COST = 0.0007
+FUNDING_PER_DAY = 0.0003   # 롱이 내는 펀딩비 가정 (0.01%/8시간)
 
 
-def run(closes: pd.DataFrame, btc_ok: pd.Series, lookback: int, hold: int, k: int, mode: str):
+def run(closes: pd.DataFrame, btc_ok: pd.Series, lookback: int, hold: int, k: int, mode: str,
+        eligible: pd.DataFrame | None = None, funding: float = 0.0):
     rets = closes.pct_change()
     mom = closes / closes.shift(lookback) - 1
+    if eligible is not None:
+        mom = mom.where(eligible)
     w = pd.DataFrame(0.0, index=closes.index, columns=closes.columns)
     cur = pd.Series(0.0, index=closes.columns)
     for i, t in enumerate(closes.index):
@@ -44,7 +53,7 @@ def run(closes: pd.DataFrame, btc_ok: pd.Series, lookback: int, hold: int, k: in
     held = w.shift(1).fillna(0)                       # 오늘 종가에 정하고 다음 날 수익부터 반영
     gross = (held * rets.fillna(0)).sum(axis=1)
     turnover = w.diff().abs().sum(axis=1).fillna(w.abs().sum(axis=1))
-    net = gross - turnover.shift(1).fillna(0) * COST
+    net = gross - turnover.shift(1).fillna(0) * COST - held.clip(lower=0).sum(axis=1) * funding
     return net
 
 
@@ -67,40 +76,52 @@ def stats(net: pd.Series):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=1095)
-    ap.add_argument("--top", type=int, default=40)
+    ap.add_argument("--top", type=int, default=35, help="[A] 오늘 기준 상위 N")
+    ap.add_argument("--wide", type=int, default=100, help="[B] 받아둘 후보 수")
+    ap.add_argument("--pit", type=int, default=30, help="[B] 그 시점 거래대금 상위 N")
+    ap.add_argument("--min-age", type=int, default=60, help="[B] 상장 후 최소 일수")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     cfg = load_config()
     client = BinanceFutures()
     u = cfg["universe"]
-    symbols = top_symbols(client, args.top, u["min_quote_volume"], u.get("exclude"))
-    if "BTCUSDT" not in symbols:
-        symbols.append("BTCUSDT")
-    closes = {}
-    for s in symbols:
+    wide = top_symbols(client, args.wide, u["min_quote_volume"], u.get("exclude"))
+    if "BTCUSDT" not in wide:
+        wide.append("BTCUSDT")
+    closes, qvol = {}, {}
+    for s in wide:
         df = load_klines(client, s, "1d", args.days)
         if len(df) >= 60:
-            closes[s] = df["close"]
-    closes = pd.DataFrame(closes).sort_index()
+            closes[s], qvol[s] = df["close"], df["quote_volume"]
+    closes, qvol = pd.DataFrame(closes).sort_index(), pd.DataFrame(qvol).sort_index()
     btc = closes["BTCUSDT"]
     btc_ok = (btc > btc.rolling(50).mean()).fillna(False)
-    print("코인 수:", closes.shape[1], " 기간:", closes.index[0].date(), "~", closes.index[-1].date())
+    print("후보 코인 수:", closes.shape[1], " 기간:", closes.index[0].date(), "~", closes.index[-1].date())
 
-    rows = [{"전략": "BTC 그냥 보유", **stats(btc.pct_change().fillna(0))}]
-    for mode in ("long", "longshort"):
-        for lb in (7, 14, 28):
-            for hold in (7, 14):
-                for k in (3, 5):
-                    net = run(closes, btc_ok, lb, hold, k, mode)
-                    rows.append({"전략": f"{'롱' if mode == 'long' else '롱숏'} L{lb} 보유{hold}일 상위{k}", **stats(net)})
-    res = pd.DataFrame(rows)
+    today_top = [s for s in wide[:args.top] if s in closes.columns]
+    age = closes.notna().cumsum()
+    qv30 = qvol.rolling(30, min_periods=20).mean()
+    pit = (qv30.rank(axis=1, ascending=False) <= args.pit) & (age >= args.min_age)
+
+    scenarios = [
+        ("A 오늘기준상위(편향)", closes[today_top], None, 0.0),
+        ("B 시점기준상위+펀딩", closes, pit, FUNDING_PER_DAY),
+    ]
     pd.set_option("display.width", 200)
-    print(f"\n===== 순환매 결과 (최근 {args.days}일, 수수료 포함) =====")
-    print(res.to_string(index=False))
-    ok = res[(res["앞70%"] > 0) & (res["뒤30%"] > 0) & (res["전략"] != "BTC 그냥 보유")]
-    print("\n===== 통과: 앞·뒤 기간 모두 플러스 =====")
-    print(ok.to_string(index=False) if len(ok) else "없음")
-
+    for name, cl, elig, fund in scenarios:
+        rows = [{"전략": "BTC 그냥 보유", **stats(btc.pct_change().fillna(0))}]
+        for mode in ("long", "longshort"):
+            for lb in (7, 14, 28):
+                for hold in (7, 14):
+                    for k in (3, 5):
+                        net = run(cl, btc_ok, lb, hold, k, mode, elig, fund)
+                        rows.append({"전략": f"{'롱' if mode == 'long' else '롱숏'} L{lb} 보유{hold}일 상위{k}", **stats(net)})
+        res = pd.DataFrame(rows)
+        print(f"\n===== [{name}] 순환매 결과 (최근 {args.days}일, 수수료 포함) =====")
+        print(res.to_string(index=False))
+        ok = res[(res["앞70%"] > 0) & (res["뒤30%"] > 0) & (res["전략"] != "BTC 그냥 보유")]
+        print(f"\n----- [{name}] 통과: 앞·뒤 기간 모두 플러스 ({len(ok)}/{len(res) - 1}) -----")
+        print(ok.to_string(index=False) if len(ok) else "없음")
 
 if __name__ == "__main__":
     main()
