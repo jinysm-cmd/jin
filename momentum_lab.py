@@ -79,13 +79,15 @@ def main():
     ap.add_argument("--top", type=int, default=35, help="[A] 오늘 기준 상위 N")
     ap.add_argument("--wide", type=int, default=100, help="[B] 받아둘 후보 수")
     ap.add_argument("--pit", type=int, default=30, help="[B] 그 시점 거래대금 상위 N")
+    ap.add_argument("--min-qv", type=float, default=5e6, help="[B] 후보 최소 24h 거래대금 (USDT)")
     ap.add_argument("--min-age", type=int, default=60, help="[B] 상장 후 최소 일수")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     cfg = load_config()
     client = BinanceFutures()
     u = cfg["universe"]
-    wide = top_symbols(client, args.wide, u["min_quote_volume"], u.get("exclude"))
+    # 후보는 넓게: config 의 1억 USDT 기준을 쓰면 오늘 상위 35개만 남아 [B] 도 편향된다
+    wide = top_symbols(client, args.wide, args.min_qv, u.get("exclude"))
     if "BTCUSDT" not in wide:
         wide.append("BTCUSDT")
     closes, qvol = {}, {}
@@ -96,6 +98,8 @@ def main():
     closes, qvol = pd.DataFrame(closes).sort_index(), pd.DataFrame(qvol).sort_index()
     btc = closes["BTCUSDT"]
     btc_ok = (btc > btc.rolling(50).mean()).fillna(False)
+    if closes.shape[1] < args.pit + 20:
+        print(f"⚠ 후보가 {closes.shape[1]}개뿐이라 [B] 도 편향이 남습니다. --min-qv 를 낮춰 보세요.")
     print("후보 코인 수:", closes.shape[1], " 기간:", closes.index[0].date(), "~", closes.index[-1].date())
 
     today_top = [s for s in wide[:args.top] if s in closes.columns]
