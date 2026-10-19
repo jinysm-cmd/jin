@@ -18,12 +18,14 @@ strategy.generate_signals 에서 StrategyParams.engine 으로 선택:
   hadoji_low   : RSI(14) < 50 이면서 직전보다 상승 (낮은 곳에서 돌아설 때)
   hadoji_up    : RSI(14) > 50 (힘이 붙은 쪽으로)
   hadoji_trend : RSI(14) > 50 + EMA200 위 (추세 방향만)
+  donchian  : 추세추종(터틀식) - EMA200 위에서 종가가 직전 20봉 최고가 돌파. 손절 2 ATR, 익절 6 ATR.
+              승률은 낮지만(30%대) 큰 추세 하나로 여러 번의 손절을 메우는 구조. 일봉/4시간봉용.
 """
 import numpy as np
 import pandas as pd
 
 ENGINES = ["pullback", "macd", "bollinger", "rsi2", "heikin", "box", "rsiha", "rsiha_rev", "rsiha_mom",
-           "hadoji_low", "hadoji_up", "hadoji_trend"]
+           "hadoji_low", "hadoji_up", "hadoji_trend", "donchian"]
 
 
 def ema(s, n):
@@ -154,6 +156,12 @@ def add_signals(f: pd.DataFrame, engine: str, put) -> None:
         tag = engine.upper()
         put(flip_up & lf, 1, tag, 1.5 * a, 3.0 * a)
         put(flip_dn & sf, -1, tag, 1.5 * a, 3.0 * a)
+
+    elif engine == "donchian":
+        long_ = (c > e200) & (c > h.rolling(20).max().shift(1)) & (c.shift(1) <= h.rolling(20).max().shift(2))
+        short = (c < e200) & (c < l.rolling(20).min().shift(1)) & (c.shift(1) >= l.rolling(20).min().shift(2))
+        put(long_, 1, "DONCHIAN", 2.0 * a, 6.0 * a)
+        put(short, -1, "DONCHIAN", 2.0 * a, 6.0 * a)
 
     else:
         raise ValueError(f"알 수 없는 engine: {engine} (가능: orderflow, {', '.join(ENGINES)})")
