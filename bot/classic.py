@@ -13,11 +13,17 @@ strategy.generate_signals 에서 StrategyParams.engine 으로 선택:
               HA 음봉 2개 뒤 아래꼬리 없는 HA 양봉 + RSI 가 40 위로 회복
   rsiha_rev : 역추세 반전 - RSI(14)<30 과매도 직후 HA 음봉→아래꼬리 없는 양봉 전환 (추세 무관, 익절 2 ATR)
   rsiha_mom : 추세 모멘텀 - EMA200 위에서 HA 양봉 2연속(아래꼬리 없음) + RSI 가 50 을 상향 돌파
+  HA 색 전환/도지 → 양봉 + RSI (사용자 요청). 직전 HA 봉이 음봉이거나 도지(몸통 ≤ 봉 길이 10%)이고
+  이번 봉이 몸통 있는 양봉이면 롱 후보, 숏은 반대. RSI 조건만 다른 3종:
+  hadoji_low   : RSI(14) < 50 이면서 직전보다 상승 (낮은 곳에서 돌아설 때)
+  hadoji_up    : RSI(14) > 50 (힘이 붙은 쪽으로)
+  hadoji_trend : RSI(14) > 50 + EMA200 위 (추세 방향만)
 """
 import numpy as np
 import pandas as pd
 
-ENGINES = ["pullback", "macd", "bollinger", "rsi2", "heikin", "box", "rsiha", "rsiha_rev", "rsiha_mom"]
+ENGINES = ["pullback", "macd", "bollinger", "rsi2", "heikin", "box", "rsiha", "rsiha_rev", "rsiha_mom",
+           "hadoji_low", "hadoji_up", "hadoji_trend"]
 
 
 def ema(s, n):
@@ -130,6 +136,24 @@ def add_signals(f: pd.DataFrame, engine: str, put) -> None:
             short = (c < e200) & strong_bear & strong_bear.shift(1) & (r < 50) & (r.shift(1) >= 50)
             put(long_, 1, "RSIHA_MOM", 1.5 * a, 3.0 * a)
             put(short, -1, "RSIHA_MOM", 1.5 * a, 3.0 * a)
+
+    elif engine in ("hadoji_low", "hadoji_up", "hadoji_trend"):
+        ho, hh, hl, hc = heikin_ashi(f)
+        body, rng = (hc - ho).abs(), (hh - hl)
+        doji = body <= 0.1 * rng
+        bull, bear = (hc > ho) & ~doji, (hc < ho) & ~doji
+        flip_up = bull & ~bull.shift(1, fill_value=False)     # 직전이 음봉 또는 도지
+        flip_dn = bear & ~bear.shift(1, fill_value=False)
+        r = rsi(c, 14)
+        if engine == "hadoji_low":
+            lf, sf = (r < 50) & (r > r.shift(1)), (r > 50) & (r < r.shift(1))
+        elif engine == "hadoji_up":
+            lf, sf = r > 50, r < 50
+        else:
+            lf, sf = (r > 50) & (c > e200), (r < 50) & (c < e200)
+        tag = engine.upper()
+        put(flip_up & lf, 1, tag, 1.5 * a, 3.0 * a)
+        put(flip_dn & sf, -1, tag, 1.5 * a, 3.0 * a)
 
     else:
         raise ValueError(f"알 수 없는 engine: {engine} (가능: orderflow, {', '.join(ENGINES)})")
