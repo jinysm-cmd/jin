@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 DEFAULTS = {
     "lookback_days": 14, "hold_days": 14, "top_k": 5, "universe_size": 30, "min_age_days": 60,
-    "min_quote_volume": 5_000_000, "exposure": 1.0, "leverage": 3, "catastrophe_stop": 0.30,
+    "min_quote_volume": 5_000_000, "exposure": 1.0, "leverage": 2, "catastrophe_stop": 0.30,
     "capital_usdt": 0, "paper_start_equity": 350, "fee": 0.0005, "slippage": 0.0002,
     "exclude": ["USDCUSDT", "FDUSDUSDT", "BTCDOMUSDT", "PAXGUSDT", "XAUTUSDT", "USDPUSDT", "TUSDUSDT"],
 }

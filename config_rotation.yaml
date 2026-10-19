@@ -9,8 +9,8 @@ min_age_days: 60         # 상장 60일 미만 코인 제외
 min_quote_volume: 5000000
 
 exposure: 1.0            # 총 포지션 금액 = 운용자금 x 1 (롱 50% + 숏 50%). 백테스트와 같은 값
-leverage: 3              # 거래소 레버리지 설정 (증거금 여유용, 노출은 위 exposure 로 정해짐)
+leverage: 2              # 격리 2배 → 청산가 약 -49%. 비상손절(-30%)이 청산보다 먼저 걸리도록 3배 이상은 쓰지 말 것
 catastrophe_stop: 0.30   # 진입가 대비 30% 반대로 가면 거래소 비상손절 (숏 스퀴즈 대비)
 
-capital_usdt: 150        # live 에서 이 봇이 쓸 금액. 0 이면 계좌 전체. 처음엔 작게!
+capital_usdt: 100        # live 에서 이 봇이 쓸 금액(USDT). 0 이면 계좌 전체. 처음엔 작게!
 paper_start_equity: 350  # 모의 계좌 시작 금액

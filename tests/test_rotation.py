@@ -83,3 +83,70 @@ def test_paper_rebalance_and_stop(tmp_path, monkeypatch):
     r.rebalance()
     for s, p in kept.items():
         assert r.state["positions"][s]["entry"] == p["entry"]
+
+
+class FakeLive(FakeClient):
+    def __init__(self, daily, foreign):
+        super().__init__(daily)
+        self.pos = {s: {"amt": 1.0, "entry": self.px[s], "mark": self.px[s]} for s in foreign}
+        self.orders, self.stops = [], []
+
+    def positions(self):
+        return dict(self.pos)
+
+    def balance_usdt(self):
+        return 350.0
+
+    def set_isolated(self, s):
+        pass
+
+    def set_leverage(self, s, lev):
+        assert lev == 2
+
+    def cancel_all(self, s):
+        assert s not in self.foreign_syms
+
+    def cancel_protective_stop(self, s, ref):
+        pass
+
+    def market_order(self, s, side, qty, reduce_only=False):
+        self.orders.append((s, side, qty, reduce_only))
+        sign = 1 if side == "BUY" else -1
+        amt = self.pos.get(s, {"amt": 0})["amt"] + sign * qty
+        if abs(amt) < 1e-12:
+            self.pos.pop(s, None)
+        else:
+            self.pos[s] = {"amt": amt, "entry": self.px[s], "mark": self.px[s]}
+        return {"avgPrice": str(self.px[s])}
+
+    def place_protective_stop(self, s, close_side, stop_px):
+        self.stops.append((s, close_side, stop_px))
+        return {"kind": "algo", "id": len(self.stops)}
+
+
+def test_live_rebalance_respects_capital_and_foreign_positions(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    daily = _daily()
+    ranked = rank_symbols(daily, DEFAULTS)
+    foreign = [ranked.index[-1], ranked.index[0]]          # 1등 롱 후보와 1등 숏 후보를 다른 봇이 들고 있음
+    r = object.__new__(Rotator)
+    r.cfg, r.mode, r.state_path = {**DEFAULTS, "capital_usdt": 100}, "live", "rotation_state_live.json"
+    r.c = FakeLive(daily, foreign)
+    r.c.foreign_syms = set(foreign)
+    r.state = r._load()
+    r.rebalance()
+    held = dict(r.state["positions"])
+    assert len(held) == 10 and not set(foreign) & set(held)
+    assert all(not ro for *_, ro in r.c.orders)            # 신규 진입만, 남의 포지션 청산 없음
+    assert all(abs(p["qty"] * p["entry"] - 10) < 0.01 for p in held.values())   # 100 x 1 / 2 / 5
+    for s, side, stop in r.c.stops:                        # 비상손절 방향 확인
+        p = held[s]
+        assert side == ("SELL" if p["side"] == 1 else "BUY")
+        assert abs(stop / p["entry"] - (1 - 0.3 * p["side"])) < 1e-9
+    # 다음 회차: 모두 정리되면 우리 것만 reduce-only 로 닫는다
+    r.state["last_rebalance"] = None
+    monkeypatch.setattr("bot.rotation.pick_targets", lambda *a: {})
+    r.rebalance()
+    closes = [o for o in r.c.orders if o[3]]
+    assert {o[0] for o in closes} == set(held) and not r.state["positions"]
+    assert set(r.c.pos) == set(foreign)
