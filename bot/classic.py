@@ -8,11 +8,16 @@ strategy.generate_signals 에서 StrategyParams.engine 으로 선택:
   heikin    : 하이킨아시 음봉 3개 이상 후 아래꼬리 없는 강한 양봉 전환 + EMA200 추세 방향
   box       : 박스권 돌파 - 최근 20봉 고저폭이 ATR 4배 이하(횡보)였다가 거래량 1.5배 이상 동반 돌파.
               손절 = 박스 중간, 익절 = 박스 높이만큼(측정 이동)
+  RSI + 하이킨아시 조합 3종 (손절 1.5 ATR / 익절 3 ATR, 숏은 롱의 대칭):
+  rsiha     : 추세 눌림 - EMA200 위에서 최근 3봉 안에 RSI(14)<40 으로 눌렸다가,
+              HA 음봉 2개 뒤 아래꼬리 없는 HA 양봉 + RSI 가 40 위로 회복
+  rsiha_rev : 역추세 반전 - RSI(14)<30 과매도 직후 HA 음봉→아래꼬리 없는 양봉 전환 (추세 무관, 익절 2 ATR)
+  rsiha_mom : 추세 모멘텀 - EMA200 위에서 HA 양봉 2연속(아래꼬리 없음) + RSI 가 50 을 상향 돌파
 """
 import numpy as np
 import pandas as pd
 
-ENGINES = ["pullback", "macd", "bollinger", "rsi2", "heikin", "box"]
+ENGINES = ["pullback", "macd", "bollinger", "rsi2", "heikin", "box", "rsiha", "rsiha_rev", "rsiha_mom"]
 
 
 def ema(s, n):
@@ -100,6 +105,31 @@ def add_signals(f: pd.DataFrame, engine: str, put) -> None:
         short = boxed & vol_ok & (c < bot) & (c.shift(1) >= bot)
         put(long_, 1, "BOX", (c - mid).clip(lower=0.5 * a), height)
         put(short, -1, "BOX", (mid - c).clip(lower=0.5 * a), height)
+
+    elif engine in ("rsiha", "rsiha_rev", "rsiha_mom"):
+        ho, hh, hl, hc = heikin_ashi(f)
+        bull, bear = hc > ho, hc < ho
+        tol = 0.05 * a
+        strong_bull = bull & ((ho - hl) <= tol)
+        strong_bear = bear & ((hh - ho) <= tol)
+        r = rsi(c, 14)
+        if engine == "rsiha":
+            long_ = (c > e200) & (r.rolling(3).min() < 40) & (r > 40) & \
+                bear.shift(1) & bear.shift(2) & strong_bull
+            short = (c < e200) & (r.rolling(3).max() > 60) & (r < 60) & \
+                bull.shift(1) & bull.shift(2) & strong_bear
+            put(long_, 1, "RSIHA", 1.5 * a, 3.0 * a)
+            put(short, -1, "RSIHA", 1.5 * a, 3.0 * a)
+        elif engine == "rsiha_rev":
+            long_ = (r.shift(1) < 30) & bear.shift(1) & strong_bull
+            short = (r.shift(1) > 70) & bull.shift(1) & strong_bear
+            put(long_, 1, "RSIHA_REV", 1.5 * a, 2.0 * a)
+            put(short, -1, "RSIHA_REV", 1.5 * a, 2.0 * a)
+        else:
+            long_ = (c > e200) & strong_bull & strong_bull.shift(1) & (r > 50) & (r.shift(1) <= 50)
+            short = (c < e200) & strong_bear & strong_bear.shift(1) & (r < 50) & (r.shift(1) >= 50)
+            put(long_, 1, "RSIHA_MOM", 1.5 * a, 3.0 * a)
+            put(short, -1, "RSIHA_MOM", 1.5 * a, 3.0 * a)
 
     else:
         raise ValueError(f"알 수 없는 engine: {engine} (가능: orderflow, {', '.join(ENGINES)})")
