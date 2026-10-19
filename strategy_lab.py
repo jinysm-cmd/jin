@@ -70,7 +70,7 @@ def main():
 
     res = pd.DataFrame(rows)
     pd.set_option("display.width", 200)
-    print("\n===== 전략 비교 (수수료·슬리피지 포함, 1년) =====")
+    print(f"\n===== 전략 비교 (수수료·슬리피지 포함, 최근 {args.days}일) =====")
     print(res.to_string(index=False))
     ok = res[(res["R_앞70%"] > 0) & (res["R_뒤30%"] > 0) & (res["trades"] >= 100)]
     print("\n===== 통과: 앞·뒤 기간 모두 플러스 & 거래 100회 이상 =====")
