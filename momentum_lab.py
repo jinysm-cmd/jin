@@ -92,7 +92,7 @@ def main():
     for s in wide:
         df = load_klines(client, s, "1d", args.days)
         if len(df) >= 60:
-            closes[s], qvol[s] = df["close"], df["quote_volume"]
+            closes[s], qvol[s] = df["close"], df["volume"] * df["close"]   # 거래대금(USDT) 근사
     closes, qvol = pd.DataFrame(closes).sort_index(), pd.DataFrame(qvol).sort_index()
     btc = closes["BTCUSDT"]
     btc_ok = (btc > btc.rolling(50).mean()).fillna(False)
