@@ -9,6 +9,7 @@ import logging
 import os
 
 from bot.config import load_config
+from bot.lock import single_instance
 from bot.trader import Trader
 
 
@@ -26,6 +27,8 @@ def main():
     if cfg["mode"] == "live" and os.environ.get("I_UNDERSTAND_THE_RISK") != "yes":
         raise SystemExit("live 모드는 환경변수 I_UNDERSTAND_THE_RISK=yes 를 설정해야 실행됩니다.")
 
+    if cfg["mode"] != "paper":
+        single_instance(f"trend_{cfg['mode']}")
     os.makedirs("logs", exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,

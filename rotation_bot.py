@@ -12,6 +12,7 @@ import os
 
 import yaml
 
+from bot.lock import single_instance
 from bot.rotation import Rotator
 
 
@@ -25,6 +26,7 @@ def main():
         cfg = yaml.safe_load(fh) or {}
     if args.mode == "live" and os.environ.get("I_UNDERSTAND_THE_RISK") != "yes":
         raise SystemExit("live 모드는 환경변수 I_UNDERSTAND_THE_RISK=yes 를 설정해야 실행됩니다.")
+    single_instance(f"rotation_{args.mode}")
     os.makedirs("logs", exist_ok=True)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
