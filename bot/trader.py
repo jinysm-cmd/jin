@@ -289,6 +289,8 @@ class Trader:
         side_cap = int(self.cfg.get("max_per_side", 0) or 0)
         min_age_ms = int(self.cfg.get("min_listing_days", 0) or 0) * 86_400_000
         allowed_side = self._btc_side(now) if self.cfg.get("btc_trend_filter") else 0
+        if allowed_side:
+            log.info("BTC 추세: %s", "상승 → 이번 봉은 롱만" if allowed_side == 1 else "하락 → 이번 봉은 숏만")
         for sym in self.symbols:
             if len(self.state["positions"]) >= self.cfg["max_positions"]:
                 break
