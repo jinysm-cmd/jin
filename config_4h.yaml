@@ -35,6 +35,10 @@ take_profit_roi: 0
 stop_loss_roi: 0
 daily_profit_stop: 0        # 하루(UTC) 수익이 이 비율 이상이면 그날 신규 진입 중단 (0=끔, 0.03=3%)
 max_daily_loss: 0.03       # 하루(UTC) 손실 3% 도달 시 당일 신규 진입 중단
+# 보완 옵션 (improve_lab.py 로 검증 후 켜기. 0/false = 끔)
+max_per_side: 0             # 같은 방향(롱 또는 숏) 동시 포지션 상한. 3 = 롱 3개·숏 3개까지
+btc_trend_filter: false     # true 면 BTC 가 EMA200 위일 때 롱만, 아래일 때 숏만
+min_listing_days: 0         # 상장 후 이 일수 미만인 코인은 거래 안 함 (180 권장 후보)
 cooldown_bars: 3           # 같은 심볼 청산 후 재진입 대기 봉 수
 paper_start_equity: 1000
 

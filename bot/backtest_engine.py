@@ -105,11 +105,14 @@ def simulate_signals(symbol: str, f: pd.DataFrame, p: StrategyParams, costs: Cos
 
 def portfolio(trades: list[Trade], risk_per_trade: float, leverage: float, max_positions: int,
               start_equity: float = 1000.0, max_daily_loss: float = 0.0,
-              daily_profit_stop: float = 0.0, margin_per_trade: float = 0.0) -> tuple[pd.DataFrame, pd.Series]:
+              daily_profit_stop: float = 0.0, margin_per_trade: float = 0.0,
+              max_per_side: int = 0) -> tuple[pd.DataFrame, pd.Series]:
     """모든 심볼 거래를 시간순으로 합쳐 동시 포지션 제한과 복리 사이징을 적용.
 
     max_daily_loss / daily_profit_stop: 하루(UTC) 실현손익이 -한도 이하 / +목표 이상이면
     그날 신규 진입 중단 (0=끔). 라이브 봇과 같은 규칙.
+    max_per_side: 같은 방향(롱 또는 숏) 동시 포지션 상한 (0=끔). 코인끼리 같이 움직여
+    같은 방향 포지션이 한꺼번에 손절되는 것을 줄인다.
     """
     if not trades:
         return pd.DataFrame(), pd.Series(dtype=float)
@@ -123,6 +126,7 @@ def portfolio(trades: list[Trade], risk_per_trade: float, leverage: float, max_p
     equity = start_equity
     open_pos: dict[int, float] = {}  # trade idx -> 진입 시 명목가(USDT)
     open_syms: set[str] = set()
+    open_side: dict[int, int] = {}
     accepted = np.zeros(len(tdf), dtype=bool)
     pnl = np.zeros(len(tdf))
     curve_t, curve_v = [], []
@@ -134,6 +138,8 @@ def portfolio(trades: list[Trade], risk_per_trade: float, leverage: float, max_p
         if kind == "in":
             if len(open_pos) >= max_positions or r.symbol in open_syms:
                 continue
+            if max_per_side > 0 and sum(1 for v in open_side.values() if v == r.side) >= max_per_side:
+                continue
             day_ret = equity / day_start - 1
             if (max_daily_loss > 0 and day_ret <= -max_daily_loss) or \
                     (daily_profit_stop > 0 and day_ret >= daily_profit_stop):
@@ -141,9 +147,11 @@ def portfolio(trades: list[Trade], risk_per_trade: float, leverage: float, max_p
             frac = notional_fraction(r.entry, r.sl_dist, risk_per_trade, leverage, max_positions, margin_per_trade)
             open_pos[k] = frac * equity
             open_syms.add(r.symbol)
+            open_side[k] = int(r.side)
             accepted[k] = True
         elif k in open_pos:
             notional = open_pos.pop(k)
+            open_side.pop(k, None)
             open_syms.discard(r.symbol)
             pnl[k] = notional * r.net_ret
             equity += pnl[k]

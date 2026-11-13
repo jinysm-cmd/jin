@@ -145,6 +145,7 @@ class BinanceFutures:
                 "status": s.get("status"),
                 "contractType": s.get("contractType"),
                 "quoteAsset": s.get("quoteAsset"),
+                "onboard_ms": int(s.get("onboardDate") or 0),
                 "tick": float(flt["PRICE_FILTER"]["tickSize"]),
                 "step": float(flt.get("MARKET_LOT_SIZE", flt["LOT_SIZE"])["stepSize"]),
                 "min_qty": float(flt.get("MARKET_LOT_SIZE", flt["LOT_SIZE"])["minQty"]),

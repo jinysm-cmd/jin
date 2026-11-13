@@ -286,9 +286,14 @@ class Trader:
             return
         n_need = warmup_bars(self.params) + 60
         now = pd.Timestamp.now(tz="UTC")
+        side_cap = int(self.cfg.get("max_per_side", 0) or 0)
+        min_age_ms = int(self.cfg.get("min_listing_days", 0) or 0) * 86_400_000
+        allowed_side = self._btc_side(now) if self.cfg.get("btc_trend_filter") else 0
         for sym in self.symbols:
             if len(self.state["positions"]) >= self.cfg["max_positions"]:
                 break
+            if min_age_ms and now.value // 1_000_000 - self.client.filters(sym).get("onboard_ms", 0) < min_age_ms:
+                continue  # 상장한 지 얼마 안 된 코인은 급등락이 심해 제외
             if sym in self.state["positions"] or self.state["cooldown"].get(sym, 0) > now.value // 1_000_000:
                 continue
             if sym in getattr(self, "_ex_pos", {}):  # 직접(수동) 잡은 포지션이 있는 코인은 건드리지 않음
@@ -304,9 +309,29 @@ class Trader:
             fr = float(marks.get(sym, {}).get("lastFundingRate", 0) or 0)
             f = generate_signals(df, self.params, pd.Series(fr, index=df.index))
             last = f.iloc[-1]
-            if last["signal"] == 0:
+            side = int(last["signal"])
+            if side == 0:
                 continue
-            self._enter(sym, int(last["signal"]), last, marks, equity)
+            if allowed_side and side != allowed_side:
+                log.info("%s 신호(%s)지만 BTC 추세와 반대 방향이라 스킵", sym, last["setup"])
+                continue
+            if side_cap and sum(1 for p in self.state["positions"].values() if p["side"] == side) >= side_cap:
+                log.info("%s 신호(%s)지만 같은 방향 포지션이 이미 %d개라 스킵", sym, last["setup"], side_cap)
+                continue
+            self._enter(sym, side, last, marks, equity)
+
+    def _btc_side(self, now) -> int:
+        """BTC 가 EMA200(봇과 같은 시간봉) 위면 +1(롱만), 아래면 -1(숏만). 조회 실패 시 0(제한 없음)."""
+        try:
+            df = self.client.klines("BTCUSDT", self.interval, limit=600)
+        except BinanceError as e:
+            log.warning("BTC 추세 조회 실패, 이번 봉은 방향 제한 없이 진행: %s", e)
+            return 0
+        c = df[df["close_time"] < now]["close"]
+        e200 = c.ewm(span=200, adjust=False, min_periods=200).mean().iloc[-1]
+        if e200 != e200:
+            return 0
+        return 1 if c.iloc[-1] > e200 else -1
 
     def _enter(self, sym, side, row, marks, equity):
         px = float(marks[sym]["markPrice"]) if sym in marks else float(row["close"])
