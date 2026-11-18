@@ -269,6 +269,19 @@ def test_rules_keep_general_department_topics():
     ]
     out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 19), {})
     kinds = {it["title"].split()[0]: it["kind"] for it in out["items"]}
-    assert kinds == {"2026학년도": "제출", "취업": "관련"}
+    assert kinds == {"2026학년도": "제출", "취업": "일정"}  # 특강은 날짜 있는 행사
     assert out["skipped"] == 1
     assert "졸업" in summarize.system_prompt({}) and "캡스톤" in summarize.system_prompt({})
+
+
+def test_rules_keep_meetings_and_guidelines():
+    docs = [
+        {"title": "2026-2학기 전체 교수회의 개최 안내", "date": "2026-11-18", "body": "11. 26.(목) 14시 대강당",
+         "key": "m", "line": ""},
+        {"title": "교수학습 지침 개발 협조 요청", "date": "2026-11-18", "body": "학과별 의견 회신",
+         "key": "g", "line": ""},
+    ]
+    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 19), {})
+    kinds = {it["title"]: it["kind"] for it in out["items"]}
+    assert kinds == {"2026-2학기 전체 교수회의 개최 안내": "일정", "교수학습 지침 개발 협조 요청": "제출"}
+    assert out["skipped"] == 0
