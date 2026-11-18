@@ -92,33 +92,43 @@ def login(page, cfg: dict, password: str) -> None:
     log.info("로그인 완료: %s", page.url)
 
 
-def click_text(page, text: str, exact_only: bool = False):
-    """화면(모든 프레임)에서 text가 보이는 요소를 클릭. 새 창이 뜨면 그 창을 돌려준다."""
+def click_text(page, text: str, exact_only: bool = False, timeout_s: int = 20):
+    """화면(모든 프레임)에서 text가 보이는 요소를 클릭. 새 창이 뜨면 그 창을 돌려준다.
+    화면이 늦게 뜨면 timeout_s 초까지 기다리며 다시 찾는다."""
+    import time
     ctx = page.context
-    for frame in _frames(page):
-        locs = [frame.get_by_text(text, exact=True)]
-        if not exact_only:
-            locs.append(frame.get_by_text(text))
-        for loc in locs:
-            for i in range(min(loc.count(), 8)):
-                el = loc.nth(i)
+    deadline = time.time() + timeout_s
+    while True:
+        for frame in _frames(page):
+            locs = [frame.get_by_text(text, exact=True)]
+            if not exact_only:
+                locs.append(frame.get_by_text(text))
+            for loc in locs:
                 try:
-                    if not el.is_visible():
-                        continue
+                    n = min(loc.count(), 8)
                 except Exception:
                     continue
-                before = len(ctx.pages)
-                el.click(timeout=10_000)
-                page.wait_for_timeout(2500)
-                if len(ctx.pages) > before:  # 팝업/새 탭
-                    new = ctx.pages[-1]
-                    _settle(new)
-                    log.info("'%s' → 새 창 %s", text, new.url)
-                    return new
-                _settle(page)
-                log.info("'%s' 클릭 → %s", text, page.url)
-                return page
-    raise RuntimeError(f"화면에서 '{text}' 메뉴를 찾지 못했습니다.")
+                for i in range(n):
+                    el = loc.nth(i)
+                    try:
+                        if not el.is_visible():
+                            continue
+                    except Exception:
+                        continue
+                    before = len(ctx.pages)
+                    el.click(timeout=10_000)
+                    page.wait_for_timeout(2500)
+                    if len(ctx.pages) > before:  # 팝업/새 탭
+                        new = ctx.pages[-1]
+                        _settle(new)
+                        log.info("'%s' → 새 창 %s", text, new.url)
+                        return new
+                    _settle(page)
+                    log.info("'%s' 클릭 → %s", text, page.url)
+                    return page
+        if time.time() > deadline:
+            raise RuntimeError(f"화면에서 '{text}' 메뉴를 찾지 못했습니다.")
+        page.wait_for_timeout(1000)
 
 
 def page_text(page) -> str:
@@ -201,6 +211,10 @@ def navigate(page, spec: dict, home_url: str):
         _settle(cur)
     for label in spec.get("click") or []:
         cur = click_text(cur, label)
+    if spec.get("then_url"):  # 그룹웨어 창이 열린 뒤(로그인 연결된 뒤) 그 안의 주소로 바로 이동
+        cur.goto(spec["then_url"], wait_until="domcontentloaded", timeout=45_000)
+        _settle(cur)
+        log.info("이동 → %s", cur.url)
     if spec.get("wait_ms"):
         cur.wait_for_timeout(int(spec["wait_ms"]))
     return cur
@@ -295,7 +309,7 @@ def read_list(page, spec: dict, home_url: str, since: dt.date, today: dt.date,
         if not dated or min(r["date"] for r in dated) < since or pno >= max_pages:
             break
         try:
-            cur = click_text(cur, str(pno + 1), exact_only=True)
+            cur = click_text(cur, str(pno + 1), exact_only=True, timeout_s=3)
             pno += 1
         except RuntimeError:
             break

@@ -37,7 +37,9 @@ pages:
     counts: ["결재대기", "수/발신대기", "공람대기"]
   # 공람대기 목록: 지난 브리핑 이후 들어온 공문만 골라 본문까지 읽음
   - name: 공람대기
-    click: ["그룹웨어", "공람 대기함"]   # 그룹웨어 왼쪽 메뉴의 '공람 대기함'
+    click: ["그룹웨어"]
+    # 그룹웨어 > 전자결재 > 공람 대기함 화면 주소 (userId 는 내 아이디)
+    then_url: "https://gw.du.ac.kr/apvl/index.do?subMenu=exhibit&userId=아이디"
     list: true
     # open_items: false   # 본문을 열지 않고 제목만 보고 정리 (열면 그룹웨어에 '확인' 처리될 수 있음)
     wait_ms: 3000

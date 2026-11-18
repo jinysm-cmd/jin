@@ -302,3 +302,11 @@ def test_relative_dates_and_real_list_titles():
     assert kinds["2027학년도 시설"] == "제출" and kinds["2026학년도 실험"] == "제출"
     assert kinds["대중문화사업단 20"] == "제출"
     assert out["skipped"] == 1  # 직원 인사발령
+
+
+def test_then_url_inside_groupware_popup(portal):
+    cfg = _cfg(portal)
+    cfg["pages"] = [{"name": "공람대기", "click": ["그룹웨어"], "then_url": f"{portal}/gongram?p=1",
+                     "list": True, "open_items": False}]
+    (res,) = brief.collect(cfg, "secret", **KW)
+    assert len(res["docs"]) == 4 and not res.get("error")
