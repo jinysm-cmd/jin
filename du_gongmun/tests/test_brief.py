@@ -101,7 +101,7 @@ def test_format_and_chunk():
     items = [
         {"kind": "제출", "title": "교육과정 개편안 제출", "sender": "교무처", "date": "2026-11-17",
          "due": "2026-11-20", "summary": "학과별 교과목 변경안", "action": "11/20까지 개편안 제출", "urgent": True},
-        {"kind": "일정", "title": "학과 회의", "sender": "", "date": "2026-11-19",
+        {"kind": "관련", "title": "학사내규 개정 시행 통보", "sender": "", "date": "2026-11-19",
          "due": "", "summary": "", "action": "참고", "urgent": False},
     ]
     state = {"seen": [], "docs_sent": []}
@@ -109,10 +109,11 @@ def test_format_and_chunk():
     assert all(it["new"] for it in items)
     text = brief.format_brief({"headline": "개편안 마감 임박", "skipped": 12, "items": items},
                               dt.date(2026, 11, 18), ["일정"], intro="11/17(화) 이후 새 공람 14건 확인")
-    assert "📝 제출·회신해야 할 것 (1)" in text
+    assert "📝 해야 할 것 (제출·회신·신청) (1)" in text
     assert "🔴 교육과정 개편안 제출 ~11/20(금) [교무처]" in text
     assert "   학과별 교과목 변경안" in text and "   → 11/20까지 개편안 제출" in text
-    assert "📅 일정 (1)" in text and "학과와 관련 없는 12건은 뺐습니다" in text
+    assert "📌 알아야 할 공문 (1)" in text and "일정" not in text.replace("못 읽은 화면: 일정", "")
+    assert "학과와 관련 없는 12건은 뺐습니다" in text
     assert "⚠️ 못 읽은 화면: 일정" in text
     parts = kakao.chunk(text * 5)
     assert all(len(p) <= 200 for p in parts) and len(parts) > 1
@@ -142,7 +143,7 @@ def test_rules_summary_from_table_rows():
     assert todo["kind"] == "제출" and todo["due"] == "2026-11-20" and todo["urgent"]
     assert by["연구윤리 교육 이수 안내"]["kind"] == "관련"
     assert "지난 학기 안내" not in by and "제목 | 발신" not in by
-    assert [it["title"] for it in out["items"] if it["kind"] == "일정"] == ["2026.11.19 학과 회의"]
+    assert {it["kind"] for it in out["items"]} <= {"제출", "관련"}
 
 
 def test_claude_cli_output_parsed(tmp_path):
@@ -269,7 +270,7 @@ def test_rules_keep_general_department_topics():
     ]
     out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 19), {})
     kinds = {it["title"].split()[0]: it["kind"] for it in out["items"]}
-    assert kinds == {"2026학년도": "제출", "취업": "일정"}  # 특강은 날짜 있는 행사
+    assert kinds == {"2026학년도": "제출", "취업": "관련"}
     assert out["skipped"] == 1
     assert "졸업" in summarize.system_prompt({}) and "캡스톤" in summarize.system_prompt({})
 
@@ -283,5 +284,21 @@ def test_rules_keep_meetings_and_guidelines():
     ]
     out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 19), {})
     kinds = {it["title"]: it["kind"] for it in out["items"]}
-    assert kinds == {"2026-2학기 전체 교수회의 개최 안내": "일정", "교수학습 지침 개발 협조 요청": "제출"}
+    assert kinds == {"2026-2학기 전체 교수회의 개최 안내": "관련", "교수학습 지침 개발 협조 요청": "제출"}
     assert out["skipped"] == 0
+
+
+def test_relative_dates_and_real_list_titles():
+    t = dt.date(2026, 11, 19)
+    assert summarize.row_date(["일반공문", "제목", "김준현", "16시간 전"], t) == t
+    assert summarize.row_date(["일반공문", "제목", "김준현", "2일 전"], t) == dt.date(2026, 11, 17)
+    titles = ["2027학년도 시설분야 예산편성 의견 수렴서 제출 요청",
+              "2026학년도 실험실습 기자재 및 소모품 잔여 예산에 대한 구입요구서 제출 요청",
+              "대중문화사업단 2026 대중음악 비즈니스 인력양성 지원사업 프로그램 출석인정 협조 요청 출석인정 대상자 명단",
+              "직원 인사발령 통보"]
+    docs = [{"title": x, "date": "2026-11-18", "body": "", "key": str(i), "line": ""} for i, x in enumerate(titles)]
+    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], t, {})
+    kinds = {it["title"][:10]: it["kind"] for it in out["items"]}
+    assert kinds["2027학년도 시설"] == "제출" and kinds["2026학년도 실험"] == "제출"
+    assert kinds["대중문화사업단 20"] == "제출"
+    assert out["skipped"] == 1  # 직원 인사발령

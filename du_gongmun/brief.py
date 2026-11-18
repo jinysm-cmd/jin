@@ -2,7 +2,7 @@
 """동서울대 그룹웨어 공문 아침 브리핑.
 
 매번 새로 로그인 → 공람대기 목록에서 지난 브리핑 이후 새 공문만 골라 본문까지 읽기 →
-학과에 해당하는 것만 '제출·회신해야 할 것 / 학과 관련 / 일정'으로 정리 → 카톡 등으로 보내기.
+학과에 해당하는 것만 '해야 할 것 / 알아야 할 것'으로 요약 → 카톡 등으로 보내기.
 
 사용법:
   python brief.py            # 실제 실행 (카톡 전송)
@@ -438,7 +438,7 @@ def _md(s: str) -> str:
         return s
 
 
-SECTIONS = [("제출", "📝 제출·회신해야 할 것"), ("관련", "🎵 학과 관련 공문"), ("일정", "📅 일정")]
+SECTIONS = [("제출", "📝 해야 할 것 (제출·회신·신청)"), ("관련", "📌 알아야 할 공문")]
 
 
 def format_brief(summary: dict, today: dt.date, errors: list[str], counts: list[str] = (),
@@ -459,13 +459,12 @@ def format_brief(summary: dict, today: dt.date, errors: list[str], counts: list[
         lines += ["", f"{title} ({len(group)})"]
         for it in group:
             mark = "🔴" if it["urgent"] else ("🆕" if it.get("new") else "·")
-            when = f" ~{_md(it['due'])}" if it["due"] else (
-                f" {_md(it['date'])}" if it["date"] and kind == "일정" else "")
+            when = f" ~{_md(it['due'])}" if it["due"] else ""
             who = f" [{it['sender']}]" if it.get("sender") else ""
             lines.append(f"{mark} {it['title']}{when}{who}")
             if it.get("summary"):
                 lines.append(f"   {it['summary']}")
-            if it.get("action") and it["action"] not in ("참고", "내용 확인") and kind != "일정":
+            if it.get("action") and it["action"] not in ("참고", "내용 확인"):
                 lines.append(f"   → {it['action']}")
     if not items:
         lines += ["", "학과에서 처리할 새 공문이 없습니다. 👍"]

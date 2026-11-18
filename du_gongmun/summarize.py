@@ -1,4 +1,4 @@
-"""그룹웨어 화면 내용 → 할일/공문/일정 목록.
+"""그룹웨어 공람 공문 → 우리 학과가 해야 할 것 / 알아야 할 것 요약.
 
 세 가지 방식 (config.yaml 의 summarizer):
   auto       맥에 Claude Code(claude 명령)가 있으면 그걸, 없으면 rules  ← 기본값, 무료
@@ -30,7 +30,7 @@ SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["제출", "관련", "일정"]},
+                    "kind": {"type": "string", "enum": ["제출", "관련"]},
                     "title": {"type": "string"},
                     "sender": {"type": "string"},
                     "date": {"type": "string"},
@@ -61,8 +61,9 @@ SYSTEM_TMPL = """당신은 동서울대학교 {dept} 교수의 아침 업무 비
   '각 학과', '전 학과', '학과장', '전체 교원', '전 교원' 대상이면 우리 학과도 해당합니다.
 - "관련": 해야 할 일은 없지만 우리 학과가 알아야 할 공문(전 학과 대상 학사·졸업·특강·캡스톤·취업·장학 안내,
   예술·음악·공연 관련 공모·지원사업·행사, 학생 관련 안내 등).
-- "일정": 우리 학과 교수가 알아야 할 날짜가 정해진 회의·행사·교육.
-뺄 것: 특정 다른 학과·부서만 해당하는 공문, 행정 부서끼리의 내부 공문, 단순 결과 통보, 우리와 무관한 외부 기관 홍보.
+  참석·신청이 필요한 회의·연수·교육도 해야 할 일이 있으면 "제출", 아니면 "관련"으로 넣습니다.
+공람함은 교수 본인 앞으로 온 공문이므로 기본은 남기고, 아래만 뺍니다.
+뺄 것: 직원 인사발령·직제개편, 모금·성금 협조, 특정 다른 학과·부서만 해당하는 공문, 행정 부서끼리의 내부 공문, 단순 결과 통보, 우리와 무관한 외부 기관 홍보.
 뺀 공문 수는 skipped 에 넣으세요. 애매하면 "관련"으로 남기세요.
 
 각 항목:
@@ -89,6 +90,9 @@ DEFAULT_TOPICS = ["졸업", "특강", "캡스톤", "교육과정", "교과목", 
                   "입시", "신입생", "모집", "전공", "학과", "교원", "교수", "연수", "강의평가", "비교과",
                   "역량", "포트폴리오", "공모전", "경진대회", "LINC", "RISE", "혁신지원", "학습",
                   "학생", "행사", "축제", "평가", "인증", "실험실습", "기자재", "교수학습", "학습지침", "강의지침", "교육지침", "지침 개발", "회의", "전체회의", "교수회의", "교직원", "워크숍", "설명회", "간담회", "위원회", "세미나", "설문", "의견수렴", "학칙"]
+# 공람함은 내 앞으로 온 공문이라 기본은 모두 남기고, 아래처럼 학과 업무와 무관한 종류만 뺀다
+DEFAULT_SKIP = ["인사발령", "직제개편", "모금", "성금", "헌혈", "부고", "조의", "홍보비 집행",
+                "법인카드", "회계 마감", "계약 체결", "청사", "보수공사", "주차"]
 ALL_DEPT_WORDS = ("각 학과", "전 학과", "전학과", "학과장", "학과별", "전체 교원", "전 교원", "전교원",
                   "전임교원", "각 학부", "학부(과)", "학과(부)")
 
@@ -109,7 +113,7 @@ def _prompt_body(pages: list[dict], today: dt.date) -> str:
     return f"오늘은 {today.isoformat()} ({WEEKDAYS[today.weekday()]}요일)입니다.\n\n" + "\n\n".join(parts)
 
 
-KIND_ALIASES = {"할일": "제출", "공문": "관련"}
+KIND_ALIASES = {"할일": "제출", "공문": "관련", "일정": "관련"}
 
 
 def _valid(data: dict) -> dict:
@@ -122,7 +126,7 @@ def _valid(data: dict) -> dict:
             continue
         it = {k: it.get(k, False if k == "urgent" else "") for k in keys}
         it["kind"] = KIND_ALIASES.get(it["kind"], it["kind"])
-        if it["kind"] not in ("제출", "관련", "일정"):
+        if it["kind"] not in ("제출", "관련"):
             it["kind"] = "관련"
         it["urgent"] = bool(it["urgent"])
         items.append(it)
@@ -200,7 +204,6 @@ DUE_FULL = re.compile(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2}
 DUE_SHORT = re.compile(r"(?<![\d.])(\d{1,2})\s*[./월]\s*(\d{1,2})\s*[일.]?\s*(?:\([^)]{1,3}\))?\s*(?:\d{1,2}:\d{2}\s*)?까지")
 YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 TODO_WORDS = ("제출", "회신", "요청", "마감", "기한", "까지", "결재", "검토", "입력", "신청", "작성", "조사", "협조")
-EVENT_WORDS = ("회의", "행사", "설명회", "워크숍", "세미나", "간담회", "교육", "시험", "특강", "위원회")
 
 
 
@@ -227,6 +230,15 @@ def _due(line: str, today: dt.date) -> dt.date | None:
 def row_date(cells: list[str], today: dt.date) -> dt.date | None:
     """목록 한 행에서 날짜: 2026-11-18 / 26.11.18 / 11-18 / 오늘이면 '14:32' 만 있는 경우도."""
     line = " ".join(cells)
+    for c in cells:  # '16시간 전', '5분 전', '방금', '어제', '2일 전'
+        c = c.strip()
+        if re.fullmatch(r"(방금|\d+\s*(초|분|시간)\s*전)", c):
+            return today  # 하루 안쪽 — 어제 오후일 수도 있지만 '새 공문'으로 보면 됨
+        m = re.fullmatch(r"(\d+)\s*일\s*전", c)
+        if m:
+            return today - dt.timedelta(days=int(m.group(1)))
+        if c in ("어제", "어제 "):
+            return today - dt.timedelta(days=1)
     m = FULL_DATE.search(line)
     if m:
         return _date(*m.groups())
@@ -261,10 +273,11 @@ def _snippet(body: str, words) -> str:
 
 
 def rules_docs(docs: list[dict], today: dt.date, cfg: dict) -> tuple[list[dict], int]:
-    """공람 공문: 학과 분야 단어, 전 학과 대상 단어, 학과 운영 주제(졸업·특강·캡스톤 등)가 있으면 남기고,
-    제출 단어가 있으면 '제출'."""
+    """공람 공문: 내 앞으로 온 것이라 기본은 남김. 인사발령·모금처럼 학과 업무와 무관한 것만 빼고,
+    제출·신청 단어가 있으면 '제출'."""
     kw = cfg.get("keywords") or DEFAULT_KEYWORDS
     topics = cfg.get("topics") or DEFAULT_TOPICS
+    skip = cfg.get("skip_words") or DEFAULT_SKIP
     dept = cfg.get("department", "실용음악학과")
     items, skipped = [], 0
     for d in docs:
@@ -273,14 +286,16 @@ def rules_docs(docs: list[dict], today: dt.date, cfg: dict) -> tuple[list[dict],
         related = dept in text or any(w in text for w in kw)
         all_dept = any(w in text for w in ALL_DEPT_WORDS) or any(w in text for w in topics)
         todo = any(w in text for w in TODO_WORDS)
-        if not (related or all_dept):
+        unrelated = any(w in d["title"] for w in skip)
+        if unrelated and not related:
+            skipped += 1
+            continue
+        if not (related or all_dept or todo or cfg.get("keep_all_by_default", True)):
             skipped += 1
             continue
         due = _due(text, today)
         if todo:
             kind = "제출"
-        elif any(w in d["title"] for w in EVENT_WORDS + ("회의", "워크숍", "설명회")):
-            kind = "일정"
         else:
             kind = "관련"
         items.append({
@@ -304,7 +319,6 @@ def with_rules(pages: list[dict], today: dt.date, cfg: dict | None = None) -> di
             items += got
             skipped += sk
             continue
-        is_calendar = any(w in p["name"] for w in ("일정", "캘린더", "달력"))
         lines = p["rows"] or [ln for ln in p["text"].splitlines() if FULL_DATE.search(ln)]
         for line in lines[:40]:
             title = _title(line)
@@ -316,15 +330,11 @@ def with_rules(pages: list[dict], today: dt.date, cfg: dict | None = None) -> di
             dates = [d for d in (_date(*m) for m in FULL_DATE.findall(line)) if d]
             date = min(dates) if dates else None
             due = _due(line, today)
-            if is_calendar or (any(w in line for w in EVENT_WORDS) and date and date >= today):
-                kind = "일정"
-            elif due or any(w in line for w in TODO_WORDS):
+            if due or any(w in line for w in TODO_WORDS):
                 kind = "제출"
             else:
                 kind = "관련"
             if kind == "관련" and date and (today - date).days > 30:
-                continue
-            if kind == "일정" and date and date < today:
                 continue
             seen.add(title)
             items.append({
