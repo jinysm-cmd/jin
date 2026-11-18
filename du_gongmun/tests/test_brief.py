@@ -170,3 +170,11 @@ def test_email_sends_to_self(monkeypatch):
     assert log["host"] == ("smtp.gmail.com", 465)
     assert log["login"] == ("me@example.com", "abcdefghijklmnop")
     assert log["msg"]["To"] == "me@example.com" and "브리핑" in log["msg"]["Subject"]
+
+
+def test_dashboard_counts():
+    text = "나의현황(교원용)\n메일\n0건\n결재대기\n2건\n수/발신대기\n1 / 0 건\n공람대기\n0건"
+    assert brief.extract_counts(text, ["결재대기", "수/발신대기", "공람대기", "없는것"]) == [
+        "결재대기 2건", "수/발신대기 1/0건", "공람대기 0건"]
+    out = brief.format_brief({"headline": "", "items": []}, dt.date(2026, 11, 19), [], ["결재대기 2건"])
+    assert out.splitlines()[1] == "📊 결재대기 2건"

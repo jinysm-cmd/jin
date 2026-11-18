@@ -160,6 +160,18 @@ def dump_debug(page, name: str) -> None:
             pass
 
 
+def extract_counts(text: str, labels: list[str]) -> list[str]:
+    """'결재대기 0건', '수/발신대기 0 / 0 건' 같은 현황 숫자를 뽑는다."""
+    import re
+    out = []
+    for label in labels:
+        m = re.search(re.escape(label) + r"\s*(\d+(?:\s*/\s*\d+)*)\s*건", text)
+        if m:
+            num = re.sub(r"\s+", "", m.group(1))
+            out.append(f"{label} {num}건")
+    return out
+
+
 def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[dict]:
     from playwright.sync_api import sync_playwright
 
@@ -195,14 +207,19 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[di
                         cur.wait_for_timeout(int(spec["wait_ms"]))
                     if debug:
                         dump_debug(cur, f"{n:02d}_{name}")
-                    results.append({"name": name, "url": cur.url,
-                                    "text": page_text(cur), "rows": table_rows(cur)})
+                    text = page_text(cur)
+                    results.append({"name": name, "url": cur.url, "text": text,
+                                    "rows": table_rows(cur),
+                                    "counts": extract_counts(text, spec.get("counts") or [])})
                     if cur is not page:
                         cur.close()
                 except Exception as e:  # 한 화면이 실패해도 나머지는 계속
                     log.warning("'%s' 읽기 실패: %s", name, e)
-                    if debug:
-                        dump_debug(page, f"{n:02d}_{name}_ERROR")
+                    if debug:  # 새 창이 열려 있었다면 그 화면들도 모두 저장
+                        for k, pg in enumerate(ctx.pages):
+                            dump_debug(pg, f"{n:02d}_{name}_ERROR_{k}")
+                    for pg in ctx.pages[1:]:
+                        pg.close()
                     results.append({"name": name, "url": "", "text": "", "rows": [],
                                     "error": str(e)})
         except Exception:
@@ -239,10 +256,12 @@ def _md(s: str) -> str:
         return s
 
 
-def format_brief(summary: dict, today: dt.date, errors: list[str]) -> str:
+def format_brief(summary: dict, today: dt.date, errors: list[str], counts: list[str] = ()) -> str:
     items = summary["items"]
     sort_key = lambda it: (not it["urgent"], it["due"] or it["date"] or "9999")  # noqa: E731
     lines = [f"📋 {today.month}/{today.day}({WEEKDAYS[today.weekday()]}) 공문 브리핑"]
+    if counts:
+        lines.append("📊 " + " · ".join(counts))
     if summary.get("headline"):
         lines.append(summary["headline"])
     sections = [("할일", "✅ 해야 할 일"), ("공문", "📌 공문"), ("일정", "📅 일정")]
@@ -306,7 +325,8 @@ def main() -> int:
                                        keyring.get_password(SERVICE, "anthropic-api-key"))
     log.info("요약 방식: %s", how)
     mark_new(summary["items"])
-    text = format_brief(summary, today, errors)
+    counts = [c for p in pages for c in p.get("counts", [])]
+    text = format_brief(summary, today, errors, counts)
     path = save_brief(text, today, cfg)
     print(text)
     log.info("브리핑 저장: %s", path)
