@@ -146,3 +146,27 @@ def test_deliver_reports_failures(monkeypatch):
     monkeypatch.setattr(notify, "mac", lambda text, f, o=True: sent.append("mac"))
     failed = notify.deliver("제목\n내용", {"delivery": ["mac", "imessage"]}, None)
     assert sent == ["mac"] and failed == ["imessage"]  # imessage_to 가 없으니 실패
+
+
+def test_email_sends_to_self(monkeypatch):
+    import notify
+    log = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout):
+            log["host"] = (host, port)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+        def login(self, user, pw):
+            log["login"] = (user, pw)
+        def send_message(self, msg):
+            log["msg"] = msg
+
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", FakeSMTP)
+    monkeypatch.setattr(notify.keyring, "get_password", lambda s, k: "abcd efgh ijkl mnop")
+    notify.email("📋 브리핑\n내용", "me@example.com")
+    assert log["host"] == ("smtp.gmail.com", 465)
+    assert log["login"] == ("me@example.com", "abcdefghijklmnop")
+    assert log["msg"]["To"] == "me@example.com" and "브리핑" in log["msg"]["Subject"]

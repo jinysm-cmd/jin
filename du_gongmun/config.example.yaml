@@ -34,15 +34,14 @@ summarizer: auto
 
 # ── 어디로 받을지 (여러 개 가능, 모두 무료) ──
 #   mac       맥 화면 오른쪽 위 알림 + 브리핑 파일이 자동으로 열림
-#   imessage  아이폰 '메시지'로 나에게 보내기 → 출근길에 폰으로 확인
-#   email     지메일로 나에게 보내기 (구글 앱 비밀번호 필요)
-#   kakao     카카오톡 (카카오 개발자 앱 설정 필요)
-delivery: ["mac", "imessage"]
+#   email     지메일로 나에게 보내기 → 갤럭시 Gmail 앱 알림으로 출근길에 확인 (구글 앱 비밀번호 필요)
+#   kakao     카카오톡 나에게 보내기 (무료, 카카오 개발자 앱 설정 필요)
+#   imessage  아이폰 사용자용
+delivery: ["mac", "email"]
 
-# imessage 받을 내 번호 또는 Apple ID 이메일
-imessage_to: "+8210xxxxxxxx"
-# email 받을 지메일 주소
-# email_to: "me@gmail.com"
+# 브리핑 받을 지메일 주소 (보내는 계정 = 받는 계정)
+email_to: "내주소@gmail.com"
+# (아이폰일 때만) imessage_to: "+8210xxxxxxxx"
 
 # 브리핑 파일을 아침에 자동으로 열지
 open_file: true
