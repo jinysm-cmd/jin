@@ -24,49 +24,81 @@ SCHEMA = {
     "type": "object",
     "properties": {
         "headline": {"type": "string"},
+        "skipped": {"type": "integer"},
         "items": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["공문", "일정", "할일"]},
+                    "kind": {"type": "string", "enum": ["제출", "관련", "일정"]},
                     "title": {"type": "string"},
                     "sender": {"type": "string"},
                     "date": {"type": "string"},
                     "due": {"type": "string"},
+                    "summary": {"type": "string"},
                     "action": {"type": "string"},
                     "urgent": {"type": "boolean"},
                 },
-                "required": ["kind", "title", "sender", "date", "due", "action", "urgent"],
+                "required": ["kind", "title", "sender", "date", "due", "summary", "action", "urgent"],
                 "additionalProperties": False,
             },
         },
     },
-    "required": ["headline", "items"],
+    "required": ["headline", "skipped", "items"],
     "additionalProperties": False,
 }
 
-SYSTEM = """당신은 동서울대학교 교수의 아침 업무 비서입니다.
-그룹웨어 화면에서 긁어 온 텍스트(메뉴, 버튼 등 잡음 포함)를 받아, 교수가 오늘 알아야 할 것만 뽑습니다.
+SYSTEM_TMPL = """당신은 동서울대학교 {dept} 교수의 아침 업무 비서입니다.
+학교 그룹웨어 공람함에 새로 들어온 공문(제목·목록 정보·본문)을 받아, 우리 학과에 필요한 것만 골라 정리합니다.
 
-- kind: 받은 공문/결재 문서는 "공문", 날짜가 정해진 회의·행사는 "일정", 제출·회신·결재·확인처럼 교수가 직접 해야 하는 일은 "할일".
-- title: 문서/일정 제목을 짧게. sender: 발신 부서나 사람(모르면 빈 문자열).
-- date: 접수일이나 일정 날짜, due: 마감·회신 기한. 둘 다 YYYY-MM-DD, 모르면 빈 문자열.
-- action: 교수가 해야 할 행동을 한 문장으로(예: "11/25까지 성적 이의신청 결과 입력"). 단순 참고면 "참고".
-- urgent: 마감이 3일 이내이거나 이미 지났으면 true.
-- 메뉴 이름, 광고, 공지 배너처럼 실제 문서가 아닌 것은 넣지 마세요. 화면에 없는 내용을 지어내지 마세요.
-- 오래된 것(30일 이상 지난 공문으로 할 일이 없는 것)은 빼세요.
-- headline: 오늘 가장 중요한 것 한 줄 요약."""
+우리 학과: {dept}. 관련 분야: {keywords}.
+
+남길 것:
+- "제출": 우리 학과나 교수가 제출·회신·신청·입력·작성·참석 등 직접 해야 하는 일이 있는 공문.
+  '각 학과', '전 학과', '학과장', '전체 교원', '전 교원' 대상이면 우리 학과도 해당합니다.
+- "관련": 해야 할 일은 없지만 우리 학과에 도움이 되는 공문(예술·음악·공연 관련 공모, 지원사업, 행사, 학과 학생 관련 안내 등).
+- "일정": 우리 학과 교수가 알아야 할 날짜가 정해진 회의·행사·교육.
+뺄 것: 다른 학과·부서만 해당하는 공문, 행정 부서끼리의 내부 공문, 단순 결과 통보, 우리와 무관한 외부 기관 홍보.
+뺀 공문 수는 skipped 에 넣으세요. 애매하면 "관련"으로 남기세요.
+
+각 항목:
+- title: 공문 제목을 짧게(문서번호 같은 대괄호 번호는 빼도 됨). sender: 발신 부서(모르면 빈 문자열).
+- date: 접수/등록일, due: 제출·회신 마감일. 둘 다 YYYY-MM-DD, 모르면 빈 문자열.
+- summary: 우리 학과 입장에서 핵심 내용 한두 문장(무엇을, 누구 대상, 얼마).
+- action: 해야 할 행동 한 문장(예: "11/25까지 학과 교육과정 변경안을 교무처에 제출"). 없으면 "참고".
+- urgent: 마감이 3일 이내이거나 지났으면 true.
+- 공문에 없는 내용은 지어내지 마세요.
+headline: 오늘 가장 먼저 챙길 것 한 줄."""
+
+
+def system_prompt(cfg: dict) -> str:
+    return SYSTEM_TMPL.format(dept=cfg.get("department", "실용음악학과"),
+                              keywords=", ".join(cfg.get("keywords") or DEFAULT_KEYWORDS))
 
 WEEKDAYS = "월화수목금토일"
+DEFAULT_KEYWORDS = ["실용음악", "음악", "예술", "공연", "보컬", "작곡", "연주", "실기", "콘서트",
+                    "음원", "저작권", "오디션", "문화", "콘텐츠"]
+ALL_DEPT_WORDS = ("각 학과", "전 학과", "전학과", "학과장", "학과별", "전체 교원", "전 교원", "전교원",
+                  "전임교원", "각 학부", "학부(과)", "학과(부)")
 
 
 def _prompt_body(pages: list[dict], today: dt.date) -> str:
-    body = "\n\n".join(
-        f"=== 화면: {p['name']} ({p['url']}) ===\n{p['text'] or '(읽기 실패: ' + p.get('error', '') + ')'}"
-        for p in pages
-    )
-    return f"오늘은 {today.isoformat()} ({WEEKDAYS[today.weekday()]}요일)입니다.\n\n{body}"
+    parts = []
+    for p in pages:
+        if p.get("counts_only"):
+            continue
+        if "docs" in p:
+            if not p["docs"]:
+                parts.append(f"=== {p['name']}: 새 공문 없음 ===")
+            for i, d in enumerate(p["docs"], 1):
+                parts.append(f"=== {p['name']} 공문 {i} ===\n목록: {d['line']}\n본문:\n{d['body'] or '(본문 못 읽음)'}")
+        else:
+            parts.append(f"=== 화면: {p['name']} ({p['url']}) ===\n"
+                         f"{p['text'] or '(읽기 실패: ' + p.get('error', '') + ')'}")
+    return f"오늘은 {today.isoformat()} ({WEEKDAYS[today.weekday()]}요일)입니다.\n\n" + "\n\n".join(parts)
+
+
+KIND_ALIASES = {"할일": "제출", "공문": "관련"}
 
 
 def _valid(data: dict) -> dict:
@@ -78,11 +110,16 @@ def _valid(data: dict) -> dict:
         if not isinstance(it, dict) or not it.get("title"):
             continue
         it = {k: it.get(k, False if k == "urgent" else "") for k in keys}
-        if it["kind"] not in ("공문", "일정", "할일"):
-            it["kind"] = "공문"
+        it["kind"] = KIND_ALIASES.get(it["kind"], it["kind"])
+        if it["kind"] not in ("제출", "관련", "일정"):
+            it["kind"] = "관련"
         it["urgent"] = bool(it["urgent"])
         items.append(it)
-    return {"headline": str(data.get("headline", "")), "items": items}
+    try:
+        skipped = int(data.get("skipped") or 0)
+    except (TypeError, ValueError):
+        skipped = 0
+    return {"headline": str(data.get("headline", "")), "skipped": skipped, "items": items}
 
 
 # ───────── Claude Code (구독, 무료 추가비용) ─────────
@@ -108,9 +145,9 @@ def _extract_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
-def with_claude_cli(pages: list[dict], today: dt.date, cli: str) -> dict:
+def with_claude_cli(pages: list[dict], today: dt.date, cli: str, cfg: dict) -> dict:
     prompt = (
-        SYSTEM
+        system_prompt(cfg)
         + "\n\n아래 JSON 형식으로만 답하세요. 설명이나 코드블록 없이 JSON 하나만 출력합니다.\n"
         + json.dumps(SCHEMA, ensure_ascii=False)
         + "\n\n"
@@ -128,7 +165,7 @@ def with_claude_cli(pages: list[dict], today: dt.date, cli: str) -> dict:
 
 
 # ───────── Claude API (유료) ─────────
-def with_api(pages: list[dict], today: dt.date, api_key: str, model: str) -> dict:
+def with_api(pages: list[dict], today: dt.date, api_key: str, model: str, cfg: dict) -> dict:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -137,7 +174,7 @@ def with_api(pages: list[dict], today: dt.date, api_key: str, model: str) -> dic
         max_tokens=16000,
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
-        system=SYSTEM,
+        system=system_prompt(cfg),
         output_config={"effort": "medium", "format": {"type": "json_schema", "schema": SCHEMA}},
         messages=[{"role": "user", "content": _prompt_body(pages, today)}],
     )
@@ -148,8 +185,8 @@ def with_api(pages: list[dict], today: dt.date, api_key: str, model: str) -> dic
 
 # ───────── 규칙 기반 (완전 무료) ─────────
 FULL_DATE = re.compile(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})")
-DUE_FULL = re.compile(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?\s*(?:\([^)]{1,3}\))?\s*(?:\d{1,2}:\d{2}\s*)?까지")
-DUE_SHORT = re.compile(r"(?<![\d.])(\d{1,2})\s*[./월]\s*(\d{1,2})\s*일?\s*(?:\([^)]{1,3}\))?\s*(?:\d{1,2}:\d{2}\s*)?까지")
+DUE_FULL = re.compile(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*[일.]?\s*(?:\([^)]{1,3}\))?\s*(?:\d{1,2}:\d{2}\s*)?까지")
+DUE_SHORT = re.compile(r"(?<![\d.])(\d{1,2})\s*[./월]\s*(\d{1,2})\s*[일.]?\s*(?:\([^)]{1,3}\))?\s*(?:\d{1,2}:\d{2}\s*)?까지")
 YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 TODO_WORDS = ("제출", "회신", "요청", "마감", "기한", "까지", "결재", "검토", "입력", "신청", "작성", "조사", "협조")
 EVENT_WORDS = ("회의", "행사", "설명회", "워크숍", "세미나", "간담회", "교육", "시험", "특강", "위원회")
@@ -175,15 +212,79 @@ def _due(line: str, today: dt.date) -> dt.date | None:
     return None
 
 
+def row_date(cells: list[str], today: dt.date) -> dt.date | None:
+    """목록 한 행에서 날짜: 2026-11-18 / 26.11.18 / 11-18 / 오늘이면 '14:32' 만 있는 경우도."""
+    line = " ".join(cells)
+    m = FULL_DATE.search(line)
+    if m:
+        return _date(*m.groups())
+    m = re.search(r"(?<!\d)(\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})(?!\d)", line)
+    if m:
+        return _date(2000 + int(m.group(1)), m.group(2), m.group(3))
+    for c in cells:
+        c = c.strip()
+        m = re.fullmatch(r"(\d{1,2})[.\-/](\d{1,2})\.?", c)
+        if m:
+            d = _date(today.year, *m.groups())
+            if d and d > today:
+                d = _date(today.year - 1, *m.groups())
+            return d
+        if re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", c):
+            return today
+    return None
+
+
 def _title(line: str) -> str:
     cells = [c.strip() for c in line.split("|") if c.strip()]
     best = max(cells, key=len) if cells else line
     return re.sub(r"\s+", " ", best)[:80]
 
 
-def with_rules(pages: list[dict], today: dt.date) -> dict:
-    items, seen = [], set()
+def _snippet(body: str, words) -> str:
+    for ln in body.splitlines():
+        ln = ln.strip()
+        if 10 <= len(ln) <= 200 and any(w in ln for w in words):
+            return ln[:90]
+    return ""
+
+
+def rules_docs(docs: list[dict], today: dt.date, cfg: dict) -> tuple[list[dict], int]:
+    """공람 공문: 학과 관련 단어/전 학과 대상 단어가 있으면 남기고, 제출 단어가 있으면 '제출'."""
+    kw = cfg.get("keywords") or DEFAULT_KEYWORDS
+    dept = cfg.get("department", "실용음악학과")
+    items, skipped = [], 0
+    for d in docs:
+        title = re.sub(r"\s+", " ", d["title"])[:80]
+        text = f"{d['title']}\n{d['body']}"
+        related = dept in text or any(w in text for w in kw)
+        all_dept = any(w in text for w in ALL_DEPT_WORDS)
+        todo = any(w in text for w in TODO_WORDS)
+        if not (related or all_dept):
+            skipped += 1
+            continue
+        kind = "제출" if todo else "관련"
+        due = _due(text, today)
+        items.append({
+            "kind": kind, "title": title, "sender": "", "date": d["date"],
+            "due": due.isoformat() if due else "",
+            "summary": _snippet(d["body"], (dept, *kw) if kind == "관련" else TODO_WORDS),
+            "action": f"{due.month}/{due.day}까지 처리" if due else ("내용 확인" if kind == "제출" else ""),
+            "urgent": bool(due and (due - today).days <= 3),
+        })
+    return items, skipped
+
+
+def with_rules(pages: list[dict], today: dt.date, cfg: dict | None = None) -> dict:
+    cfg = cfg or {}
+    items, seen, skipped = [], set(), 0
     for p in pages:
+        if p.get("counts_only"):
+            continue
+        if "docs" in p:
+            got, sk = rules_docs(p["docs"], today, cfg)
+            items += got
+            skipped += sk
+            continue
         is_calendar = any(w in p["name"] for w in ("일정", "캘린더", "달력"))
         lines = p["rows"] or [ln for ln in p["text"].splitlines() if FULL_DATE.search(ln)]
         for line in lines[:40]:
@@ -199,23 +300,24 @@ def with_rules(pages: list[dict], today: dt.date) -> dict:
             if is_calendar or (any(w in line for w in EVENT_WORDS) and date and date >= today):
                 kind = "일정"
             elif due or any(w in line for w in TODO_WORDS):
-                kind = "할일"
+                kind = "제출"
             else:
-                kind = "공문"
-            if kind == "공문" and date and (today - date).days > 30:
+                kind = "관련"
+            if kind == "관련" and date and (today - date).days > 30:
                 continue
             if kind == "일정" and date and date < today:
                 continue
             seen.add(title)
             items.append({
-                "kind": kind, "title": title, "sender": "", "urgent": bool(due and (due - today).days <= 3),
+                "kind": kind, "title": title, "sender": "", "summary": "",
+                "urgent": bool(due and (due - today).days <= 3),
                 "date": date.isoformat() if date else "", "due": due.isoformat() if due else "",
-                "action": f"{due.month}/{due.day}까지 처리" if due else ("내용 확인" if kind == "할일" else ""),
+                "action": f"{due.month}/{due.day}까지 처리" if due else ("내용 확인" if kind == "제출" else ""),
             })
-    n_todo = sum(it["kind"] == "할일" for it in items)
+    n_todo = sum(it["kind"] == "제출" for it in items)
     n_urgent = sum(it["urgent"] for it in items)
-    headline = f"할 일 {n_todo}건" + (f", 그중 마감 임박 {n_urgent}건" if n_urgent else "") if items else ""
-    return {"headline": headline, "items": items}
+    headline = (f"해야 할 일 {n_todo}건" + (f", 그중 마감 임박 {n_urgent}건" if n_urgent else "")) if n_todo else ""
+    return {"headline": headline, "skipped": skipped, "items": items}
 
 
 # ───────── 선택 ─────────
@@ -226,7 +328,7 @@ def summarize(pages: list[dict], today: dt.date, cfg: dict, api_key: str | None)
         cli = cfg.get("claude_path") and os.path.expanduser(cfg["claude_path"]) or find_claude_cli()
         if cli:
             try:
-                return with_claude_cli(pages, today, cli), "Claude(구독)"
+                return with_claude_cli(pages, today, cli, cfg), "Claude(구독)"
             except Exception as e:
                 log.warning("Claude Code 요약 실패, 다음 방식으로: %s", e)
                 tried.append("claude_cli")
@@ -234,7 +336,7 @@ def summarize(pages: list[dict], today: dt.date, cfg: dict, api_key: str | None)
             log.warning("claude 명령을 찾지 못했습니다. config.yaml 에 claude_path 를 넣어주세요.")
     if mode == "api" and api_key:
         try:
-            return with_api(pages, today, api_key, cfg.get("model", "claude-opus-5-5")), "Claude API"
+            return with_api(pages, today, api_key, cfg.get("model", "claude-opus-5-5"), cfg), "Claude API"
         except Exception as e:
             log.warning("Claude API 요약 실패: %s", e)
-    return with_rules(pages, today), "규칙"
+    return with_rules(pages, today, cfg), "규칙"

@@ -15,16 +15,22 @@ username: "아이디"
 #   url:   그 화면 주소를 바로 열기 (로그인 후 주소창에서 복사)
 #   click: 로그인 직후 화면에서 차례로 누를 메뉴 글자
 # 둘 중 하나만 써도 되고, url로 연 뒤 click을 이어서 해도 됩니다.
+# 우리 학과 — 이 학과와 관련 없는 공문은 뺍니다
+department: "실용음악학과"
+keywords: ["실용음악", "음악", "예술", "공연", "보컬", "작곡", "연주", "실기", "콘서트",
+           "음원", "저작권", "오디션", "문화", "콘텐츠"]
+
 pages:
   # 로그인 직후 첫 화면의 '나의현황' 숫자 (url/click 없음 = 첫 화면 그대로)
   - name: 포털 현황
     counts: ["결재대기", "수/발신대기", "공람대기"]
-  - name: 그룹웨어
-    click: ["그룹웨어"]
+  # 공람대기 목록: 지난 브리핑 이후 들어온 공문만 골라 본문까지 읽음
+  - name: 공람대기
+    click: ["공람대기"]
+    list: true
     wait_ms: 3000
-  - name: 일정
-    click: ["일정"]
-    wait_ms: 3000
+    max_pages: 5      # 목록 몇 쪽까지 넘겨볼지
+    max_items: 40     # 하루 최대 몇 건 읽을지
 
 # ── 어떻게 정리할지 (모두 무료가 기본) ──
 #   auto       맥에 Claude Code(claude 명령)가 설치·로그인돼 있으면 그걸로 똑똑하게 정리
@@ -40,10 +46,9 @@ summarizer: auto
 #   email     지메일로 나에게 보내기 → 갤럭시 Gmail 앱 알림으로 출근길에 확인 (구글 앱 비밀번호 필요)
 #   kakao     카카오톡 나에게 보내기 (무료, 카카오 개발자 앱 설정 필요)
 #   imessage  아이폰 사용자용
-delivery: ["mac", "email"]
+delivery: ["mac", "kakao"]
 
-# 브리핑 받을 지메일 주소 (보내는 계정 = 받는 계정)
-email_to: "내주소@gmail.com"
+# (메일로도 받을 때만) email_to: "내주소@gmail.com"
 # (아이폰일 때만) imessage_to: "+8210xxxxxxxx"
 
 # 브리핑 파일을 아침에 자동으로 열지
@@ -56,6 +61,6 @@ output_dir: "~/Documents/공문브리핑"
 headless: true
 # browser_channel: "chrome"
 
-# (카카오톡을 쓸 때만) 메시지의 '포털 열기' 버튼 주소, 최대 메시지 수
-# link_url: "https://portal.du.ac.kr/"
-# max_kakao_messages: 8
+# 카톡 메시지의 '포털 열기' 버튼 주소, 최대 메시지 수(200자씩 나눠 보냄)
+link_url: "https://portal.du.ac.kr/"
+max_kakao_messages: 15

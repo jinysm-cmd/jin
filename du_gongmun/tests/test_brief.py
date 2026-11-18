@@ -15,7 +15,20 @@ import kakao  # noqa: E402
 PAGES = {
     "/login": """<form method=post action=/login><input type=text name=id>
                  <input type=password name=pw><button>로그인</button></form>""",
-    "/main": """<a href="/gw" target="_blank">그룹웨어</a> <a href="#">학사</a>""",
+    "/main": """<a href="/gw" target="_blank">그룹웨어</a> <a href="#">학사</a>
+                <a href="/gongram?p=1">공람대기</a>""",
+    "/gongram?p=1": """<table><tr><th>제목</th><th>발신</th><th>일자</th></tr>
+      <tr><td><a href="/doc1" target="_blank">2027 교육과정 개편 학과별 의견 제출 요청</a></td><td>교무처</td><td>2026-11-19</td></tr>
+      <tr><td><a href="/doc2">청사 보수공사 안내</a></td><td>시설팀</td><td>2026-11-19</td></tr>
+      <tr><td><a href="/doc3" target="_blank">창작지원 공모 안내</a></td><td>산학협력단</td><td>2026-11-18</td></tr>
+      </table><a href="/gongram?p=1">1</a> <a href="/gongram?p=2">2</a>""",
+    "/gongram?p=2": """<table><tr><td><a href="/doc4">회계 마감 안내</a></td><td>재무팀</td><td>26.11.18</td></tr>
+      <tr><td><a href="/doc5">옛 공문</a></td><td>총무팀</td><td>2026-11-17</td></tr>
+      </table><a href="/gongram?p=1">1</a> <a href="/gongram?p=2">2</a>""",
+    "/doc1": "각 학과는 2026. 11. 25.까지 교육과정 의견을 제출하시기 바랍니다.",
+    "/doc2": "본관 3층 공사로 엘리베이터 운행을 중지합니다.",
+    "/doc3": "음악·공연 분야 창작자에게 제작비를 지원하는 공모입니다.",
+    "/doc4": "부서 예산 집행 마감을 안내합니다.",
     "/gw": """<a href="/approval">전자결재</a>""",
     "/approval": """<iframe src="/menu" width=800 height=600></iframe>""",
     "/menu": """<a href="/inbox">수신함</a>""",
@@ -51,6 +64,9 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+KW = dict(headless=True, debug=False, since=dt.date(2026, 11, 18), today=dt.date(2026, 11, 19), seen=set())
+
+
 @pytest.fixture(scope="module")
 def portal():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -69,7 +85,7 @@ def _cfg(base):
 
 
 def test_collect_follows_popup_and_iframe(portal):
-    pages = brief.collect(_cfg(portal), "secret", headless=True, debug=False)
+    pages = brief.collect(_cfg(portal), "secret", **KW)
     inbox, missing = pages
     assert "교육과정 개편안" in inbox["text"]
     assert any("연구윤리" in r for r in inbox["rows"])
@@ -78,26 +94,36 @@ def test_collect_follows_popup_and_iframe(portal):
 
 def test_bad_password_raises(portal):
     with pytest.raises(RuntimeError, match="로그인"):
-        brief.collect(_cfg(portal), "wrong", headless=True, debug=False)
+        brief.collect(_cfg(portal), "wrong", **KW)
 
 
-def test_format_and_chunk(tmp_path, monkeypatch):
-    monkeypatch.setattr(brief, "STATE_FILE", tmp_path / "s.json")
+def test_format_and_chunk():
     items = [
-        {"kind": "할일", "title": "교육과정 개편안 제출", "sender": "교무처", "date": "2026-11-17",
-         "due": "2026-11-20", "action": "11/20까지 개편안 제출", "urgent": True},
+        {"kind": "제출", "title": "교육과정 개편안 제출", "sender": "교무처", "date": "2026-11-17",
+         "due": "2026-11-20", "summary": "학과별 교과목 변경안", "action": "11/20까지 개편안 제출", "urgent": True},
         {"kind": "일정", "title": "학과 회의", "sender": "", "date": "2026-11-19",
-         "due": "", "action": "참고", "urgent": False},
+         "due": "", "summary": "", "action": "참고", "urgent": False},
     ]
-    brief.mark_new(items)
+    state = {"seen": [], "docs_sent": []}
+    brief.mark_new(items, state)
     assert all(it["new"] for it in items)
-    brief.mark_new(items)
-    assert not any(it["new"] for it in items)
-    text = brief.format_brief({"headline": "개편안 마감 임박", "items": items}, dt.date(2026, 11, 18), ["일정"])
-    assert "🔴 교육과정 개편안 제출 ~11/20(금)" in text
-    assert "📅 일정 (1)" in text and "⚠️ 못 읽은 화면: 일정" in text
+    text = brief.format_brief({"headline": "개편안 마감 임박", "skipped": 12, "items": items},
+                              dt.date(2026, 11, 18), ["일정"], intro="11/17(화) 이후 새 공람 14건 확인")
+    assert "📝 제출·회신해야 할 것 (1)" in text
+    assert "🔴 교육과정 개편안 제출 ~11/20(금) [교무처]" in text
+    assert "   학과별 교과목 변경안" in text and "   → 11/20까지 개편안 제출" in text
+    assert "📅 일정 (1)" in text and "학과와 관련 없는 12건은 뺐습니다" in text
+    assert "⚠️ 못 읽은 화면: 일정" in text
     parts = kakao.chunk(text * 5)
     assert all(len(p) <= 200 for p in parts) and len(parts) > 1
+
+
+def test_since_date():
+    today = dt.date(2026, 11, 23)  # 월요일
+    assert brief.since_date({}, today) == dt.date(2026, 11, 22)
+    assert brief.since_date({"last_day": "2026-11-20"}, today) == dt.date(2026, 11, 20)  # 금요일부터
+    assert brief.since_date({"last_day": "2026-11-23"}, today) == dt.date(2026, 11, 22)  # 오늘 또 돌리면 어제부터
+    assert brief.since_date({"last_day": "2026-10-01"}, today) == dt.date(2026, 11, 16)  # 최대 7일
 
 
 import summarize  # noqa: E402
@@ -113,8 +139,8 @@ def test_rules_summary_from_table_rows():
     out = summarize.with_rules(pages, dt.date(2026, 11, 18))
     by = {it["title"]: it for it in out["items"]}
     todo = by["2027학년도 교육과정 개편안 제출 요청 (11/20까지)"]
-    assert todo["kind"] == "할일" and todo["due"] == "2026-11-20" and todo["urgent"]
-    assert by["연구윤리 교육 이수 안내"]["kind"] == "공문"
+    assert todo["kind"] == "제출" and todo["due"] == "2026-11-20" and todo["urgent"]
+    assert by["연구윤리 교육 이수 안내"]["kind"] == "관련"
     assert "지난 학기 안내" not in by and "제목 | 발신" not in by
     assert [it["title"] for it in out["items"] if it["kind"] == "일정"] == ["2026.11.19 학과 회의"]
 
@@ -176,7 +202,7 @@ def test_dashboard_counts():
     text = "나의현황(교원용)\n메일\n0건\n결재대기\n2건\n수/발신대기\n1 / 0 건\n공람대기\n0건"
     assert brief.extract_counts(text, ["결재대기", "수/발신대기", "공람대기", "없는것"]) == [
         "결재대기 2건", "수/발신대기 1/0건", "공람대기 0건"]
-    out = brief.format_brief({"headline": "", "items": []}, dt.date(2026, 11, 19), [], ["결재대기 2건"])
+    out = brief.format_brief({"headline": "", "skipped": 0, "items": []}, dt.date(2026, 11, 19), [], ["결재대기 2건"])
     assert out.splitlines()[1] == "📊 결재대기 2건"
 
 
@@ -198,3 +224,37 @@ def test_rules_skip_past_year_titles():
     out = summarize.with_rules([{"name": "그룹웨어", "url": "", "text": "", "rows": rows}],
                                dt.date(2026, 11, 19))
     assert [it["title"][:12] for it in out["items"]] == ["[20250082] [", "2026 한국전문대학교"]
+
+
+def test_gongram_list_since_yesterday_with_bodies(portal):
+    cfg = _cfg(portal)
+    cfg["pages"] = [{"name": "공람대기", "click": ["공람대기"], "list": True}]
+    (res,) = brief.collect(cfg, "secret", **KW)
+    titles = [d["title"] for d in res["docs"]]
+    assert titles == ["2027 교육과정 개편 학과별 의견 제출 요청", "청사 보수공사 안내",
+                      "창작지원 공모 안내", "회계 마감 안내"]  # 11/17 은 제외, 2쪽까지 넘어감
+    bodies = {d["title"]: d["body"] for d in res["docs"]}
+    assert "교육과정 의견" in bodies["2027 교육과정 개편 학과별 의견 제출 요청"]  # 새 창
+    assert "엘리베이터" in bodies["청사 보수공사 안내"]  # 같은 창 이동 후 목록으로 복귀
+    assert "예산 집행" in bodies["회계 마감 안내"]  # 2쪽 공문
+
+    out = summarize.with_rules([res], dt.date(2026, 11, 19), {"department": "실용음악학과"})
+    assert out["skipped"] == 2
+    (todo,) = [it for it in out["items"] if it["kind"] == "제출"]
+    assert todo["due"] == "2026-11-25"
+    assert [it["title"] for it in out["items"] if it["kind"] == "관련"] == ["창작지원 공모 안내"]
+
+    # 이미 보낸 공문은 다음날 다시 안 나옴
+    seen = {res["docs"][0]["key"]}
+    (res2,) = brief.collect(cfg, "secret", **{**KW, "seen": seen})
+    assert len(res2["docs"]) == 3
+
+
+def test_row_date_formats():
+    t = dt.date(2026, 11, 19)
+    assert summarize.row_date(["제목", "2026.11.18"], t) == dt.date(2026, 11, 18)
+    assert summarize.row_date(["제목", "26-11-17"], t) == dt.date(2026, 11, 17)
+    assert summarize.row_date(["제목", "11-18"], t) == dt.date(2026, 11, 18)
+    assert summarize.row_date(["제목", "12-30"], t) == dt.date(2025, 12, 30)
+    assert summarize.row_date(["제목", "09:41"], t) == t
+    assert summarize.row_date(["제목", "교무처"], t) is None

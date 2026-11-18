@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """동서울대 그룹웨어 공문 아침 브리핑.
 
-매번 새로 로그인 → 설정한 화면(공문 수신함, 일정 등)의 내용을 읽기 →
-'처리할 공문 / 일정 / 할 일' 정리 → 맥 알림·아이메시지·메일 등으로 보내기.
+매번 새로 로그인 → 공람대기 목록에서 지난 브리핑 이후 새 공문만 골라 본문까지 읽기 →
+학과에 해당하는 것만 '제출·회신해야 할 것 / 학과 관련 / 일정'으로 정리 → 카톡 등으로 보내기.
 
 사용법:
   python brief.py            # 실제 실행 (카톡 전송)
@@ -92,11 +92,14 @@ def login(page, cfg: dict, password: str) -> None:
     log.info("로그인 완료: %s", page.url)
 
 
-def click_text(page, text: str):
+def click_text(page, text: str, exact_only: bool = False):
     """화면(모든 프레임)에서 text가 보이는 요소를 클릭. 새 창이 뜨면 그 창을 돌려준다."""
     ctx = page.context
     for frame in _frames(page):
-        for loc in (frame.get_by_text(text, exact=True), frame.get_by_text(text)):
+        locs = [frame.get_by_text(text, exact=True)]
+        if not exact_only:
+            locs.append(frame.get_by_text(text))
+        for loc in locs:
             for i in range(min(loc.count(), 8)):
                 el = loc.nth(i)
                 try:
@@ -187,7 +190,143 @@ def wait_counts(page, labels: list[str], max_wait_s: int = 30) -> None:
     log.warning("현황 숫자가 %d초 안에 다 뜨지 않았습니다. 인터넷이 느릴 수 있어요.", max_wait_s)
 
 
-def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[dict]:
+def navigate(page, spec: dict, home_url: str):
+    """spec 의 url/click 대로 이동해서 도착한 화면(새 창일 수도 있음)을 돌려준다."""
+    cur = page
+    if cur.url != home_url and not spec.get("url"):
+        cur.goto(home_url, wait_until="domcontentloaded", timeout=45_000)
+        _settle(cur)
+    if spec.get("url"):
+        cur.goto(spec["url"], wait_until="domcontentloaded", timeout=45_000)
+        _settle(cur)
+    for label in spec.get("click") or []:
+        cur = click_text(cur, label)
+    if spec.get("wait_ms"):
+        cur.wait_for_timeout(int(spec["wait_ms"]))
+    return cur
+
+
+_ROWS_JS = "trs => trs.map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim()))"
+
+
+def list_rows(page, today: dt.date) -> list[dict]:
+    """목록 화면의 표 행들: 제목, 날짜, 위치(다시 찾아 클릭하기 위해)."""
+    rows = []
+    for fi, f in enumerate(_frames(page)):
+        try:
+            all_cells = f.eval_on_selector_all("tr", _ROWS_JS)
+        except Exception:
+            continue
+        for ti, cells in enumerate(all_cells[:300]):
+            cells = [c for c in cells if c]
+            if len(cells) < 2:
+                continue
+            rows.append({"fi": fi, "ti": ti, "cells": cells, "line": " | ".join(cells),
+                         "title": max(cells, key=len)[:150],
+                         "date": summarize.row_date(cells, today)})
+    return rows
+
+
+def _row_locator(page, row: dict):
+    frames = _frames(page)
+    if row["fi"] < len(frames):
+        f = frames[row["fi"]]
+        try:
+            cells = [c for c in f.eval_on_selector_all("tr", _ROWS_JS)[row["ti"]] if c]
+            if " | ".join(cells) == row["line"]:
+                return f.locator("tr").nth(row["ti"])
+        except Exception:
+            pass
+    for f in frames:  # 위치가 바뀌었으면 내용으로 다시 찾기
+        try:
+            for ti, cells in enumerate(f.eval_on_selector_all("tr", _ROWS_JS)):
+                if " | ".join(c for c in cells if c) == row["line"]:
+                    return f.locator("tr").nth(ti)
+        except Exception:
+            continue
+    return None
+
+
+def open_row(page, row: dict) -> tuple[str, bool]:
+    """행을 눌러 공문 본문을 읽는다. (본문, 목록 화면을 떠났는지) 를 돌려준다."""
+    tr = _row_locator(page, row)
+    if tr is None:
+        return "", False
+    links = tr.locator("a")
+    if links.count():
+        target = max((links.nth(i) for i in range(min(links.count(), 5))),
+                     key=lambda el: len(el.inner_text() or ""))
+    else:
+        tds = tr.locator("td")
+        texts = tds.all_inner_texts()
+        target = tds.nth(max(range(len(texts)), key=lambda i: len(texts[i])))
+    ctx = page.context
+    before_pages, before_text = len(ctx.pages), page_text(page)
+    target.click(timeout=10_000)
+    page.wait_for_timeout(2500)
+    if len(ctx.pages) > before_pages:  # 본문이 새 창으로 열림
+        doc = ctx.pages[-1]
+        _settle(doc)
+        body = page_text(doc)
+        doc.close()
+        return body, False
+    _settle(page)
+    old = set(before_text.splitlines())
+    body = "\n".join(l for l in page_text(page).splitlines() if l not in old)
+    return body, True
+
+
+def read_list(page, spec: dict, home_url: str, since: dt.date, today: dt.date,
+              seen: set, debug: bool, tag: str) -> tuple[list[dict], int]:
+    """목록에서 since 이후 새 공문을 골라(여러 쪽까지) 본문을 읽는다. (공문들, 새로 들어온 전체 수)"""
+    max_pages, max_items = int(spec.get("max_pages", 5)), int(spec.get("max_items", 40))
+    cur = navigate(page, spec, home_url)
+    picked, pno = [], 1
+    while True:
+        rows = list_rows(cur, today)
+        if debug:
+            dump_debug(cur, f"{tag}_p{pno}")
+        dated = [r for r in rows if r["date"]]
+        for r in dated:
+            if r["date"] >= since and doc_key(r) not in seen:
+                picked.append((pno, r))
+        log.info("%s %d쪽: 행 %d개, 날짜 있는 행 %d개, 새 공문 누적 %d개",
+                 spec.get("name"), pno, len(rows), len(dated), len(picked))
+        if not dated or min(r["date"] for r in dated) < since or pno >= max_pages:
+            break
+        try:
+            cur = click_text(cur, str(pno + 1), exact_only=True)
+            pno += 1
+        except RuntimeError:
+            break
+    total = len(picked)
+    picked = picked[:max_items]
+    docs, at_list, at_page = [], True, pno
+    for pno_i, r in picked:
+        body = ""
+        if spec.get("open_items", True):
+            try:
+                if not at_list or at_page != pno_i:
+                    if cur is not page:
+                        cur.close()
+                    cur = navigate(page, spec, home_url)
+                    if pno_i > 1:
+                        cur = click_text(cur, str(pno_i), exact_only=True)
+                    at_page = pno_i
+                body, left = open_row(cur, r)
+                at_list = not left
+            except Exception as e:
+                log.warning("공문 열기 실패 (%s): %s", r["title"][:30], e)
+                at_list = False
+        docs.append({"title": r["title"], "date": r["date"].isoformat(), "line": r["line"],
+                     "body": body[:6000], "key": doc_key(r)})
+    if cur is not page:
+        cur.close()
+    return docs, total
+
+
+def collect(cfg: dict, password: str, *, headless: bool, debug: bool,
+            since: dt.date, today: dt.date, seen: set) -> list[dict]:
     from playwright.sync_api import sync_playwright
 
     results = []
@@ -201,6 +340,7 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[di
         ctx = browser.new_context(locale="ko-KR", viewport={"width": 1400, "height": 1000})
         page = ctx.new_page()
         page.on("dialog", lambda d: d.accept())  # '비밀번호 변경 안내' 같은 알림창 자동 닫기
+        ctx.on("page", lambda pg: pg.on("dialog", lambda d: d.accept()))
         try:
             login(page, cfg, password)
             if debug:
@@ -208,33 +348,30 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[di
             home_url = page.url
             for n, spec in enumerate(cfg["pages"], 1):
                 name = spec.get("name", f"page{n}")
+                tag = f"{n:02d}_{name}"
                 try:
-                    cur = page
-                    if cur.url != home_url and not spec.get("url"):
-                        cur.goto(home_url, wait_until="domcontentloaded")
-                        _settle(cur)
-                    if spec.get("url"):
-                        cur.goto(spec["url"], wait_until="domcontentloaded", timeout=45_000)
-                        _settle(cur)
-                    for label in spec.get("click") or []:
-                        cur = click_text(cur, label)
-                    if spec.get("wait_ms"):
-                        cur.wait_for_timeout(int(spec["wait_ms"]))
+                    if spec.get("list"):
+                        docs, total = read_list(page, spec, home_url, since, today, seen, debug, tag)
+                        results.append({"name": name, "url": "", "text": "", "rows": [],
+                                        "docs": docs, "new_total": total})
+                        continue
+                    cur = navigate(page, spec, home_url)
                     if spec.get("counts"):  # 숫자가 늦게 뜨는 화면: 다 뜰 때까지 기다림
                         wait_counts(cur, spec["counts"], int(spec.get("max_wait_s", 30)))
                     if debug:
-                        dump_debug(cur, f"{n:02d}_{name}")
+                        dump_debug(cur, tag)
                     text = page_text(cur)
                     results.append({"name": name, "url": cur.url, "text": text,
                                     "rows": table_rows(cur),
-                                    "counts": extract_counts(text, spec.get("counts") or [])})
+                                    "counts": extract_counts(text, spec.get("counts") or []),
+                                    "counts_only": bool(spec.get("counts"))})
                     if cur is not page:
                         cur.close()
                 except Exception as e:  # 한 화면이 실패해도 나머지는 계속
                     log.warning("'%s' 읽기 실패: %s", name, e)
                     if debug:  # 새 창이 열려 있었다면 그 화면들도 모두 저장
                         for k, pg in enumerate(ctx.pages):
-                            dump_debug(pg, f"{n:02d}_{name}_ERROR_{k}")
+                            dump_debug(pg, f"{tag}_ERROR_{k}")
                     for pg in ctx.pages[1:]:
                         pg.close()
                     results.append({"name": name, "url": "", "text": "", "rows": [],
@@ -248,20 +385,48 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[di
     return results
 
 
-# ───────────────────────── 상태(새 공문 표시) ─────────────────────────
+# ───────────────────────── 상태 ─────────────────────────
+def doc_key(row: dict) -> str:
+    d = row["date"].isoformat() if isinstance(row["date"], dt.date) else row["date"]
+    return hashlib.sha1(f"{row['line']}|{d}".encode()).hexdigest()[:16]
+
+
 def item_key(it: dict) -> str:
     return hashlib.sha1(f"{it['kind']}|{it['title']}|{it['date']}".encode()).hexdigest()[:16]
 
 
-def mark_new(items: list[dict]) -> None:
+def load_state() -> dict:
     try:
-        seen = set(json.loads(STATE_FILE.read_text())["seen"])
+        st = json.loads(STATE_FILE.read_text())
     except Exception:
-        seen = set()
+        st = {}
+    st.setdefault("seen", [])
+    st.setdefault("docs_sent", [])
+    return st
+
+
+def since_date(state: dict, today: dt.date) -> dt.date:
+    """지난번 브리핑 날짜부터(주말·휴일도 이어지게). 처음이면 어제부터. 최대 7일 전까지."""
+    try:
+        last = dt.date.fromisoformat(state.get("last_day", ""))
+    except ValueError:
+        last = None
+    if not last or last >= today:
+        last = today - dt.timedelta(days=1)
+    return max(last, today - dt.timedelta(days=7))
+
+
+def mark_new(items: list[dict], state: dict) -> None:
+    seen = set(state["seen"])
     for it in items:
         it["new"] = item_key(it) not in seen
-    seen |= {item_key(it) for it in items}
-    STATE_FILE.write_text(json.dumps({"seen": sorted(seen)[-2000:]}))
+
+
+def save_state(state: dict, items: list[dict], docs: list[dict], today: dt.date) -> None:
+    state["seen"] = sorted(set(state["seen"]) | {item_key(it) for it in items})[-3000:]
+    state["docs_sent"] = (state["docs_sent"] + [d["key"] for d in docs])[-5000:]
+    state["last_day"] = today.isoformat()
+    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False))
 
 
 # ───────────────────────── 메시지 ─────────────────────────
@@ -273,28 +438,39 @@ def _md(s: str) -> str:
         return s
 
 
-def format_brief(summary: dict, today: dt.date, errors: list[str], counts: list[str] = ()) -> str:
+SECTIONS = [("제출", "📝 제출·회신해야 할 것"), ("관련", "🎵 학과 관련 공문"), ("일정", "📅 일정")]
+
+
+def format_brief(summary: dict, today: dt.date, errors: list[str], counts: list[str] = (),
+                 intro: str = "") -> str:
     items = summary["items"]
     sort_key = lambda it: (not it["urgent"], it["due"] or it["date"] or "9999")  # noqa: E731
     lines = [f"📋 {today.month}/{today.day}({WEEKDAYS[today.weekday()]}) 공문 브리핑"]
     if counts:
         lines.append("📊 " + " · ".join(counts))
+    if intro:
+        lines.append(intro)
     if summary.get("headline"):
         lines.append(summary["headline"])
-    sections = [("할일", "✅ 해야 할 일"), ("공문", "📌 공문"), ("일정", "📅 일정")]
-    for kind, title in sections:
+    for kind, title in SECTIONS:
         group = sorted((it for it in items if it["kind"] == kind), key=sort_key)
         if not group:
             continue
         lines += ["", f"{title} ({len(group)})"]
         for it in group:
             mark = "🔴" if it["urgent"] else ("🆕" if it.get("new") else "·")
-            when = f" ~{_md(it['due'])}" if it["due"] else (f" {_md(it['date'])}" if it["date"] and kind == "일정" else "")
-            lines.append(f"{mark} {it['title']}{when}")
-            if it["action"] and it["action"] != "참고" and kind != "일정":
+            when = f" ~{_md(it['due'])}" if it["due"] else (
+                f" {_md(it['date'])}" if it["date"] and kind == "일정" else "")
+            who = f" [{it['sender']}]" if it.get("sender") else ""
+            lines.append(f"{mark} {it['title']}{when}{who}")
+            if it.get("summary"):
+                lines.append(f"   {it['summary']}")
+            if it.get("action") and it["action"] not in ("참고", "내용 확인") and kind != "일정":
                 lines.append(f"   → {it['action']}")
     if not items:
-        lines += ["", "새로 처리할 공문이 없습니다. 👍"]
+        lines += ["", "학과에서 처리할 새 공문이 없습니다. 👍"]
+    if summary.get("skipped"):
+        lines += ["", f"(학과와 관련 없는 {summary['skipped']}건은 뺐습니다)"]
     if errors:
         lines += ["", "⚠️ 못 읽은 화면: " + ", ".join(errors)]
     return "\n".join(lines)
@@ -330,8 +506,12 @@ def main() -> int:
     if not password:
         sys.exit("포털 비밀번호가 키체인에 없습니다. `python setup_secrets.py` 를 먼저 실행하세요.")
 
+    state = load_state()
+    since = since_date(state, today)
+    log.info("%s 이후 공문을 찾습니다.", since.isoformat())
     try:
-        pages = collect(cfg, password, headless=not a.show and cfg.get("headless", True), debug=a.debug)
+        pages = collect(cfg, password, headless=not a.show and cfg.get("headless", True),
+                        debug=a.debug, since=since, today=today, seen=set(state["docs_sent"]))
     except Exception as e:
         notify_error(f"포털 접속/로그인 오류: {e}")
         traceback.print_exc()
@@ -341,12 +521,21 @@ def main() -> int:
     summary, how = summarize.summarize(pages, today, cfg,
                                        keyring.get_password(SERVICE, "anthropic-api-key"))
     log.info("요약 방식: %s", how)
-    mark_new(summary["items"])
+    mark_new(summary["items"], state)
     counts = [c for p in pages for c in p.get("counts", [])]
-    text = format_brief(summary, today, errors, counts)
+    docs = [d for p in pages for d in p.get("docs", [])]
+    intro = ""
+    if any("docs" in p for p in pages):
+        total = sum(p.get("new_total", 0) for p in pages)
+        intro = f"{_md(since.isoformat())} 이후 새 공람 {total}건 확인"
+        if total > len(docs):
+            intro += f" (앞의 {len(docs)}건만 읽음)"
+    text = format_brief(summary, today, errors, counts, intro)
     path = save_brief(text, today, cfg)
     print(text)
     log.info("브리핑 저장: %s", path)
+    if not a.dry_run:
+        save_state(state, summary["items"], docs, today)
 
     if not a.dry_run and notify.deliver(text, cfg, path):
         return 1
