@@ -1,0 +1,5 @@
+config.yaml
+state.json
+debug/
+logs/
+.venv/

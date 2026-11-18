@@ -1,0 +1,38 @@
+# 이 파일을 config.yaml 로 복사해서 채우세요.  (cp config.example.yaml config.yaml)
+# 비밀번호는 여기에 쓰지 않습니다 → setup_secrets.py 로 키체인에 저장.
+
+# 포털 로그인 화면 주소 (브라우저 주소창에서 복사)
+login_url: "https://portal.du.ac.kr/"
+username: "아이디"
+
+# 로그인 칸을 자동으로 못 찾을 때만 채우세요 (CSS 선택자)
+# selectors:
+#   username: "#userId"
+#   password: "#userPw"
+#   submit: "#btnLogin"
+
+# 로그인 후 읽을 화면들. 위에서부터 순서대로.
+#   url:   그 화면 주소를 바로 열기 (로그인 후 주소창에서 복사)
+#   click: 로그인 직후 화면에서 차례로 누를 메뉴 글자
+# 둘 중 하나만 써도 되고, url로 연 뒤 click을 이어서 해도 됩니다.
+pages:
+  - name: 공문 수신함
+    click: ["그룹웨어", "전자결재", "수신함"]
+  - name: 결재 대기
+    click: ["그룹웨어", "전자결재", "결재대기"]
+  - name: 일정
+    click: ["그룹웨어", "일정"]
+
+# 카톡 메시지의 '포털 열기' 버튼 주소
+# (카카오 개발자 앱 > 플랫폼 > Web 사이트 도메인에 같은 도메인을 등록해야 버튼이 동작)
+link_url: "https://portal.du.ac.kr/"
+
+# 카톡은 메시지 하나에 200자 제한 → 여러 개로 나눠 보냄. 최대 몇 개까지 보낼지
+max_kakao_messages: 8
+
+# 전체 브리핑 저장 위치
+output_dir: "~/Documents/공문브리핑"
+
+# 사이트가 자동 브라우저를 막으면: browser_channel: "chrome" (설치된 크롬 사용)
+headless: true
+# browser_channel: "chrome"
