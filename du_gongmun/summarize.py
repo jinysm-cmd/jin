@@ -150,6 +150,7 @@ def with_api(pages: list[dict], today: dt.date, api_key: str, model: str) -> dic
 FULL_DATE = re.compile(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})")
 DUE_FULL = re.compile(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?\s*(?:\([^)]{1,3}\))?\s*(?:\d{1,2}:\d{2}\s*)?까지")
 DUE_SHORT = re.compile(r"(?<![\d.])(\d{1,2})\s*[./월]\s*(\d{1,2})\s*일?\s*(?:\([^)]{1,3}\))?\s*(?:\d{1,2}:\d{2}\s*)?까지")
+YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 TODO_WORDS = ("제출", "회신", "요청", "마감", "기한", "까지", "결재", "검토", "입력", "신청", "작성", "조사", "협조")
 EVENT_WORDS = ("회의", "행사", "설명회", "워크숍", "세미나", "간담회", "교육", "시험", "특강", "위원회")
 
@@ -188,6 +189,9 @@ def with_rules(pages: list[dict], today: dt.date) -> dict:
         for line in lines[:40]:
             title = _title(line)
             if len(title) < 4 or title in seen:
+                continue
+            years = [int(y) for y in YEAR.findall(title)]
+            if years and max(years) < today.year:  # '2019학년도 …' 같은 지난 해 문서
                 continue
             dates = [d for d in (_date(*m) for m in FULL_DATE.findall(line)) if d]
             date = min(dates) if dates else None

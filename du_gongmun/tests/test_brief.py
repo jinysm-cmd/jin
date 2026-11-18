@@ -189,3 +189,12 @@ def test_wait_counts_waits_for_loading(monkeypatch):
             pass
     brief.wait_counts(P(), ["결재대기"], 30)
     assert next(texts) == "결재대기 3건"  # 두 번 연속 3건을 확인하고 멈춤
+
+
+def test_rules_skip_past_year_titles():
+    rows = ["2019학년도 하반기 교원 단기연수 참가", "2025 한국전문대학교육협의회 온라인 연수 참가",
+            "[20250082] [25-12]2027학년도 전문기술석사과정 설치 인가 신청서 작성",
+            "2026 한국전문대학교육협의회 온라인 연수 참가"]
+    out = summarize.with_rules([{"name": "그룹웨어", "url": "", "text": "", "rows": rows}],
+                               dt.date(2026, 11, 19))
+    assert [it["title"][:12] for it in out["items"]] == ["[20250082] [", "2026 한국전문대학교"]
