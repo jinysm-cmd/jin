@@ -23,12 +23,18 @@ if [ ! -f config.yaml ]; then
   exit 0
 fi
 
-echo "▶ 3/4 비밀번호 · 카카오 연결"
+echo "▶ 3/4 비밀번호 저장 (키체인)"
 if ! .venv/bin/python -c "import keyring,sys; sys.exit(0 if keyring.get_password('du-gongmun','portal-password') else 1)"; then
   .venv/bin/python setup_secrets.py
 fi
-if ! .venv/bin/python -c "import keyring,sys; sys.exit(0 if keyring.get_password('du-gongmun','kakao-token') else 1)"; then
+if grep -E '^delivery:.*kakao' config.yaml >/dev/null \
+   && ! .venv/bin/python -c "import keyring,sys; sys.exit(0 if keyring.get_password('du-gongmun','kakao-token') else 1)"; then
   .venv/bin/python kakao.py setup
+fi
+if command -v claude >/dev/null || [ -x "$HOME/.local/bin/claude" ]; then
+  echo "  Claude Code 발견 → 구독으로 요약합니다 (추가 요금 없음)."
+else
+  echo "  Claude Code 없음 → 규칙 방식으로 정리합니다 (무료)."
 fi
 
 echo "▶ 4/4 매일 평일 ${HOUR}시 ${MIN}분 자동 실행 등록"
@@ -61,4 +67,4 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo
 echo "✅ 설치 완료. 지금 한번 시험해 보려면:"
 echo "   cd \"$DIR\" && .venv/bin/python brief.py --dry-run --show"
-echo "   (카톡까지 보내려면 --dry-run 을 빼세요)"
+echo "   (알림·메시지까지 보내려면 --dry-run 을 빼세요)"

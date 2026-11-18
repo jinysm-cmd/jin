@@ -2,11 +2,11 @@
 """동서울대 그룹웨어 공문 아침 브리핑.
 
 매번 새로 로그인 → 설정한 화면(공문 수신함, 일정 등)의 내용을 읽기 →
-Claude로 '처리할 공문 / 일정 / 할 일' 정리 → 카카오톡 나에게 보내기.
+'처리할 공문 / 일정 / 할 일' 정리 → 맥 알림·아이메시지·메일 등으로 보내기.
 
 사용법:
   python brief.py            # 실제 실행 (카톡 전송)
-  python brief.py --dry-run  # 카톡 안 보내고 화면에만 출력
+  python brief.py --dry-run  # 보내지 않고 화면에만 출력
   python brief.py --debug    # 각 화면 스크린샷/HTML을 debug/ 폴더에 저장 (설정 맞출 때)
   python brief.py --show     # 브라우저 창을 띄워서 진행 과정 보기
 """
@@ -23,6 +23,9 @@ import traceback
 
 import keyring
 import yaml
+
+import notify
+import summarize
 
 HERE = pathlib.Path(__file__).resolve().parent
 SERVICE = "du-gongmun"
@@ -211,80 +214,6 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[di
     return results
 
 
-# ───────────────────────── 요약 ─────────────────────────
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "headline": {"type": "string"},
-        "items": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "enum": ["공문", "일정", "할일"]},
-                    "title": {"type": "string"},
-                    "sender": {"type": "string"},
-                    "date": {"type": "string"},
-                    "due": {"type": "string"},
-                    "action": {"type": "string"},
-                    "urgent": {"type": "boolean"},
-                },
-                "required": ["kind", "title", "sender", "date", "due", "action", "urgent"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["headline", "items"],
-    "additionalProperties": False,
-}
-
-SYSTEM = """당신은 동서울대학교 교수의 아침 업무 비서입니다.
-그룹웨어 화면에서 긁어 온 텍스트(메뉴, 버튼 등 잡음 포함)를 받아, 교수가 오늘 알아야 할 것만 뽑습니다.
-
-- kind: 받은 공문/결재 문서는 "공문", 날짜가 정해진 회의·행사는 "일정", 제출·회신·결재·확인처럼 교수가 직접 해야 하는 일은 "할일".
-- title: 문서/일정 제목을 짧게. sender: 발신 부서나 사람(모르면 빈 문자열).
-- date: 접수일이나 일정 날짜, due: 마감·회신 기한. 둘 다 YYYY-MM-DD, 모르면 빈 문자열.
-- action: 교수가 해야 할 행동을 한 문장으로(예: "11/25까지 성적 이의신청 결과 입력"). 단순 참고면 "참고".
-- urgent: 마감이 3일 이내이거나 이미 지났으면 true.
-- 메뉴 이름, 광고, 공지 배너처럼 실제 문서가 아닌 것은 넣지 마세요. 화면에 없는 내용을 지어내지 마세요.
-- 오래된 것(30일 이상 지난 공문으로 할 일이 없는 것)은 빼세요.
-- headline: 오늘 가장 중요한 것 한 줄 요약."""
-
-
-def summarize_with_claude(pages: list[dict], api_key: str, today: dt.date, model: str) -> dict:
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=api_key)
-    body = "\n\n".join(
-        f"=== 화면: {p['name']} ({p['url']}) ===\n{p['text'] or '(읽기 실패: ' + p.get('error', '') + ')'}"
-        for p in pages
-    )
-    resp = client.beta.messages.create(
-        model=model,
-        max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        system=SYSTEM,
-        output_config={"effort": "medium", "format": {"type": "json_schema", "schema": SCHEMA}},
-        messages=[{"role": "user",
-                   "content": f"오늘은 {today.isoformat()} ({WEEKDAYS[today.weekday()]}요일)입니다.\n\n{body}"}],
-    )
-    if resp.stop_reason == "refusal":
-        raise RuntimeError("Claude가 요약을 거절했습니다.")
-    text = next(b.text for b in resp.content if b.type == "text")
-    return json.loads(text)
-
-
-def fallback_summary(pages: list[dict]) -> dict:
-    """API 키가 없거나 실패했을 때: 표의 행을 그대로 공문으로."""
-    items = []
-    for p in pages:
-        for row in p["rows"][:15]:
-            items.append({"kind": "공문", "title": row[:80], "sender": p["name"], "date": "",
-                          "due": "", "action": "", "urgent": False})
-    return {"headline": "(자동 요약 없이 목록만 보냅니다)", "items": items}
-
-
 # ───────────────────────── 상태(새 공문 표시) ─────────────────────────
 def item_key(it: dict) -> str:
     return hashlib.sha1(f"{it['kind']}|{it['title']}|{it['date']}".encode()).hexdigest()[:16]
@@ -347,7 +276,7 @@ def save_brief(text: str, today: dt.date, cfg: dict) -> pathlib.Path:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(HERE / "config.yaml"))
-    ap.add_argument("--dry-run", action="store_true", help="카톡 보내지 않고 출력만")
+    ap.add_argument("--dry-run", action="store_true", help="보내지 않고 출력만")
     ap.add_argument("--debug", action="store_true", help="화면 스크린샷/HTML 저장")
     ap.add_argument("--show", action="store_true", help="브라우저 창 띄우기")
     a = ap.parse_args()
@@ -359,11 +288,7 @@ def main() -> int:
     def notify_error(msg: str) -> None:
         log.error(msg)
         if not a.dry_run:
-            try:
-                import kakao
-                kakao.send(f"⚠️ 공문 브리핑 실패\n{msg[:150]}", cfg.get("link_url", ""))
-            except Exception as e:
-                log.error("오류 알림도 보내지 못했습니다: %s", e)
+            notify.deliver(f"⚠️ 공문 브리핑 실패\n{msg[:300]}", {**cfg, "open_file": False}, None)
 
     password = keyring.get_password(SERVICE, "portal-password")
     if not password:
@@ -377,30 +302,17 @@ def main() -> int:
         return 1
     errors = [p["name"] for p in pages if p.get("error")]
 
-    api_key = keyring.get_password(SERVICE, "anthropic-api-key")
-    summary = None
-    if api_key:
-        try:
-            summary = summarize_with_claude(pages, api_key, today, cfg.get("model", "claude-opus-5-5"))
-        except Exception as e:
-            log.warning("Claude 요약 실패, 목록만 보냅니다: %s", e)
-    if summary is None:
-        summary = fallback_summary(pages)
-
+    summary, how = summarize.summarize(pages, today, cfg,
+                                       keyring.get_password(SERVICE, "anthropic-api-key"))
+    log.info("요약 방식: %s", how)
     mark_new(summary["items"])
     text = format_brief(summary, today, errors)
     path = save_brief(text, today, cfg)
     print(text)
     log.info("브리핑 저장: %s", path)
 
-    if not a.dry_run:
-        import kakao
-        try:
-            n = kakao.send(text, cfg.get("link_url", ""), int(cfg.get("max_kakao_messages", 8)))
-            log.info("카카오톡 %d개 메시지 전송", n)
-        except Exception as e:
-            log.error("카카오 전송 실패: %s", e)
-            return 1
+    if not a.dry_run and notify.deliver(text, cfg, path):
+        return 1
     return 0
 
 

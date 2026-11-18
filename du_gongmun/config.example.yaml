@@ -23,12 +23,29 @@ pages:
   - name: 일정
     click: ["그룹웨어", "일정"]
 
-# 카톡 메시지의 '포털 열기' 버튼 주소
-# (카카오 개발자 앱 > 플랫폼 > Web 사이트 도메인에 같은 도메인을 등록해야 버튼이 동작)
-link_url: "https://portal.du.ac.kr/"
+# ── 어떻게 정리할지 (모두 무료가 기본) ──
+#   auto       맥에 Claude Code(claude 명령)가 설치·로그인돼 있으면 그걸로 똑똑하게 정리
+#              (Claude 구독에 포함 → 추가 요금 없음), 없으면 rules 방식
+#   rules      AI 없이 날짜와 '제출·회신·까지' 같은 단어로 정리 (완전 무료)
+#   api        Claude API 키 사용 (유료)
+summarizer: auto
+# claude 명령을 못 찾으면 위치 지정 (터미널에서 `which claude` 로 확인)
+# claude_path: "~/.local/bin/claude"
 
-# 카톡은 메시지 하나에 200자 제한 → 여러 개로 나눠 보냄. 최대 몇 개까지 보낼지
-max_kakao_messages: 8
+# ── 어디로 받을지 (여러 개 가능, 모두 무료) ──
+#   mac       맥 화면 오른쪽 위 알림 + 브리핑 파일이 자동으로 열림
+#   imessage  아이폰 '메시지'로 나에게 보내기 → 출근길에 폰으로 확인
+#   email     지메일로 나에게 보내기 (구글 앱 비밀번호 필요)
+#   kakao     카카오톡 (카카오 개발자 앱 설정 필요)
+delivery: ["mac", "imessage"]
+
+# imessage 받을 내 번호 또는 Apple ID 이메일
+imessage_to: "+8210xxxxxxxx"
+# email 받을 지메일 주소
+# email_to: "me@gmail.com"
+
+# 브리핑 파일을 아침에 자동으로 열지
+open_file: true
 
 # 전체 브리핑 저장 위치
 output_dir: "~/Documents/공문브리핑"
@@ -36,3 +53,7 @@ output_dir: "~/Documents/공문브리핑"
 # 사이트가 자동 브라우저를 막으면: browser_channel: "chrome" (설치된 크롬 사용)
 headless: true
 # browser_channel: "chrome"
+
+# (카카오톡을 쓸 때만) 메시지의 '포털 열기' 버튼 주소, 최대 메시지 수
+# link_url: "https://portal.du.ac.kr/"
+# max_kakao_messages: 8

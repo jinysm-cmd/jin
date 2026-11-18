@@ -98,3 +98,51 @@ def test_format_and_chunk(tmp_path, monkeypatch):
     assert "📅 일정 (1)" in text and "⚠️ 못 읽은 화면: 일정" in text
     parts = kakao.chunk(text * 5)
     assert all(len(p) <= 200 for p in parts) and len(parts) > 1
+
+
+import summarize  # noqa: E402
+
+
+def test_rules_summary_from_table_rows():
+    pages = [{"name": "공문 수신함", "url": "", "text": "", "rows": [
+        "2027학년도 교육과정 개편안 제출 요청 (11/20까지) | 교무처 | 2026-11-17",
+        "연구윤리 교육 이수 안내 | 산학협력단 | 2026-11-16",
+        "지난 학기 안내 | 학생처 | 2026-08-01",
+        "제목 | 발신",
+    ]}, {"name": "일정", "url": "", "text": "2026.11.19 학과 회의\n2026.10.01 지난 회의", "rows": []}]
+    out = summarize.with_rules(pages, dt.date(2026, 11, 18))
+    by = {it["title"]: it for it in out["items"]}
+    todo = by["2027학년도 교육과정 개편안 제출 요청 (11/20까지)"]
+    assert todo["kind"] == "할일" and todo["due"] == "2026-11-20" and todo["urgent"]
+    assert by["연구윤리 교육 이수 안내"]["kind"] == "공문"
+    assert "지난 학기 안내" not in by and "제목 | 발신" not in by
+    assert [it["title"] for it in out["items"] if it["kind"] == "일정"] == ["2026.11.19 학과 회의"]
+
+
+def test_claude_cli_output_parsed(tmp_path):
+    import json
+    inner = {"headline": "h", "items": [{"kind": "할일", "title": "t", "due": "2026-11-20"}]}
+    (tmp_path / "out.json").write_text(json.dumps(
+        {"type": "result", "is_error": False, "result": "```json\n" + json.dumps(inner) + "\n```"}))
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\ncat >/dev/null\ncat '{tmp_path / 'out.json'}'\n")
+    fake.chmod(0o755)
+    pages = [{"name": "x", "url": "", "text": "t", "rows": []}]
+    out, how = summarize.summarize(pages, dt.date(2026, 11, 18), {"claude_path": str(fake)}, None)
+    assert how == "Claude(구독)"
+    assert out["items"][0]["due"] == "2026-11-20" and out["items"][0]["urgent"] is False
+
+
+def test_falls_back_to_rules_when_no_cli(monkeypatch):
+    monkeypatch.setattr(summarize, "find_claude_cli", lambda: None)
+    _, how = summarize.summarize([{"name": "x", "url": "", "text": "", "rows": []}],
+                                 dt.date(2026, 11, 18), {}, None)
+    assert how == "규칙"
+
+
+def test_deliver_reports_failures(monkeypatch):
+    import notify
+    sent = []
+    monkeypatch.setattr(notify, "mac", lambda text, f, o=True: sent.append("mac"))
+    failed = notify.deliver("제목\n내용", {"delivery": ["mac", "imessage"]}, None)
+    assert sent == ["mac"] and failed == ["imessage"]  # imessage_to 가 없으니 실패
