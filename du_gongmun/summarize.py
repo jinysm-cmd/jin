@@ -52,13 +52,16 @@ SYSTEM_TMPL = """당신은 동서울대학교 {dept} 교수의 아침 업무 비
 학교 그룹웨어 공람함에 새로 들어온 공문(제목·목록 정보·본문)을 받아, 우리 학과에 필요한 것만 골라 정리합니다.
 
 우리 학과: {dept}. 관련 분야: {keywords}.
+예술 분야가 아니어도 모든 학과에 해당하는 학과 운영 공문은 반드시 남깁니다:
+{topics} 등.
 
 남길 것:
 - "제출": 우리 학과나 교수가 제출·회신·신청·입력·작성·참석 등 직접 해야 하는 일이 있는 공문.
   '각 학과', '전 학과', '학과장', '전체 교원', '전 교원' 대상이면 우리 학과도 해당합니다.
-- "관련": 해야 할 일은 없지만 우리 학과에 도움이 되는 공문(예술·음악·공연 관련 공모, 지원사업, 행사, 학과 학생 관련 안내 등).
+- "관련": 해야 할 일은 없지만 우리 학과가 알아야 할 공문(전 학과 대상 학사·졸업·특강·캡스톤·취업·장학 안내,
+  예술·음악·공연 관련 공모·지원사업·행사, 학생 관련 안내 등).
 - "일정": 우리 학과 교수가 알아야 할 날짜가 정해진 회의·행사·교육.
-뺄 것: 다른 학과·부서만 해당하는 공문, 행정 부서끼리의 내부 공문, 단순 결과 통보, 우리와 무관한 외부 기관 홍보.
+뺄 것: 특정 다른 학과·부서만 해당하는 공문, 행정 부서끼리의 내부 공문, 단순 결과 통보, 우리와 무관한 외부 기관 홍보.
 뺀 공문 수는 skipped 에 넣으세요. 애매하면 "관련"으로 남기세요.
 
 각 항목:
@@ -73,11 +76,18 @@ headline: 오늘 가장 먼저 챙길 것 한 줄."""
 
 def system_prompt(cfg: dict) -> str:
     return SYSTEM_TMPL.format(dept=cfg.get("department", "실용음악학과"),
-                              keywords=", ".join(cfg.get("keywords") or DEFAULT_KEYWORDS))
+                              keywords=", ".join(cfg.get("keywords") or DEFAULT_KEYWORDS),
+                              topics=", ".join(cfg.get("topics") or DEFAULT_TOPICS))
 
 WEEKDAYS = "월화수목금토일"
 DEFAULT_KEYWORDS = ["실용음악", "음악", "예술", "공연", "보컬", "작곡", "연주", "실기", "콘서트",
                     "음원", "저작권", "오디션", "문화", "콘텐츠"]
+# 예술 분야가 아니어도 학과 운영에 필요한 주제 (config.yaml 의 topics 로 바꿀 수 있음)
+DEFAULT_TOPICS = ["졸업", "특강", "캡스톤", "교육과정", "교과목", "수업", "강의", "시간표", "성적", "출석",
+                  "학사", "휴학", "복학", "학생지도", "상담", "취업", "현장실습", "산학", "인턴", "장학",
+                  "입시", "신입생", "모집", "전공", "학과", "교원", "교수", "연수", "강의평가", "비교과",
+                  "역량", "포트폴리오", "공모전", "경진대회", "LINC", "RISE", "혁신지원", "학습",
+                  "학생", "행사", "축제", "평가", "인증", "실험실습", "기자재"]
 ALL_DEPT_WORDS = ("각 학과", "전 학과", "전학과", "학과장", "학과별", "전체 교원", "전 교원", "전교원",
                   "전임교원", "각 학부", "학부(과)", "학과(부)")
 
@@ -249,15 +259,17 @@ def _snippet(body: str, words) -> str:
 
 
 def rules_docs(docs: list[dict], today: dt.date, cfg: dict) -> tuple[list[dict], int]:
-    """공람 공문: 학과 관련 단어/전 학과 대상 단어가 있으면 남기고, 제출 단어가 있으면 '제출'."""
+    """공람 공문: 학과 분야 단어, 전 학과 대상 단어, 학과 운영 주제(졸업·특강·캡스톤 등)가 있으면 남기고,
+    제출 단어가 있으면 '제출'."""
     kw = cfg.get("keywords") or DEFAULT_KEYWORDS
+    topics = cfg.get("topics") or DEFAULT_TOPICS
     dept = cfg.get("department", "실용음악학과")
     items, skipped = [], 0
     for d in docs:
         title = re.sub(r"\s+", " ", d["title"])[:80]
         text = f"{d['title']}\n{d['body']}"
         related = dept in text or any(w in text for w in kw)
-        all_dept = any(w in text for w in ALL_DEPT_WORDS)
+        all_dept = any(w in text for w in ALL_DEPT_WORDS) or any(w in text for w in topics)
         todo = any(w in text for w in TODO_WORDS)
         if not (related or all_dept):
             skipped += 1

@@ -258,3 +258,17 @@ def test_row_date_formats():
     assert summarize.row_date(["제목", "12-30"], t) == dt.date(2025, 12, 30)
     assert summarize.row_date(["제목", "09:41"], t) == t
     assert summarize.row_date(["제목", "교무처"], t) is None
+
+
+def test_rules_keep_general_department_topics():
+    docs = [
+        {"title": "2026학년도 졸업작품 전시 및 캡스톤디자인 결과보고서 제출", "date": "2026-11-18",
+         "body": "각 학과는 12. 5.까지 결과보고서를 제출", "key": "a", "line": ""},
+        {"title": "취업 특강 개최 안내", "date": "2026-11-18", "body": "재학생 대상 특강", "key": "b", "line": ""},
+        {"title": "법인카드 사용 지침", "date": "2026-11-18", "body": "경리 담당자 참고", "key": "c", "line": ""},
+    ]
+    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 19), {})
+    kinds = {it["title"].split()[0]: it["kind"] for it in out["items"]}
+    assert kinds == {"2026학년도": "제출", "취업": "관련"}
+    assert out["skipped"] == 1
+    assert "졸업" in summarize.system_prompt({}) and "캡스톤" in summarize.system_prompt({})
