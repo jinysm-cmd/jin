@@ -178,3 +178,14 @@ def test_dashboard_counts():
         "결재대기 2건", "수/발신대기 1/0건", "공람대기 0건"]
     out = brief.format_brief({"headline": "", "items": []}, dt.date(2026, 11, 19), [], ["결재대기 2건"])
     assert out.splitlines()[1] == "📊 결재대기 2건"
+
+
+def test_wait_counts_waits_for_loading(monkeypatch):
+    texts = iter(["데이터 조회중입니다", "결재대기 0건", "결재대기 3건", "결재대기 3건", "결재대기 3건"])
+    monkeypatch.setattr(brief, "page_text", lambda page: next(texts))
+
+    class P:
+        def wait_for_timeout(self, ms):
+            pass
+    brief.wait_counts(P(), ["결재대기"], 30)
+    assert next(texts) == "결재대기 3건"  # 두 번 연속 3건을 확인하고 멈춤

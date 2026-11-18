@@ -55,7 +55,7 @@ def _frames(page):
 
 def _settle(page, ms: int = 1500) -> None:
     try:
-        page.wait_for_load_state("networkidle", timeout=15_000)
+        page.wait_for_load_state("networkidle", timeout=30_000)
     except Exception:
         pass
     page.wait_for_timeout(ms)
@@ -172,6 +172,21 @@ def extract_counts(text: str, labels: list[str]) -> list[str]:
     return out
 
 
+def wait_counts(page, labels: list[str], max_wait_s: int = 30) -> None:
+    """'조회중' 문구가 사라지고 숫자가 두 번 연속 같게 읽힐 때까지(최대 max_wait_s초) 기다린다."""
+    import time
+    deadline, prev = time.time() + max_wait_s, None
+    page.wait_for_timeout(3000)
+    while time.time() < deadline:
+        text = page_text(page)
+        cur = extract_counts(text, labels)
+        if "조회중" not in text and len(cur) == len(labels) and cur == prev:
+            return
+        prev = cur
+        page.wait_for_timeout(3000)
+    log.warning("현황 숫자가 %d초 안에 다 뜨지 않았습니다. 인터넷이 느릴 수 있어요.", max_wait_s)
+
+
 def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[dict]:
     from playwright.sync_api import sync_playwright
 
@@ -205,6 +220,8 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool) -> list[di
                         cur = click_text(cur, label)
                     if spec.get("wait_ms"):
                         cur.wait_for_timeout(int(spec["wait_ms"]))
+                    if spec.get("counts"):  # 숫자가 늦게 뜨는 화면: 다 뜰 때까지 기다림
+                        wait_counts(cur, spec["counts"], int(spec.get("max_wait_s", 30)))
                     if debug:
                         dump_debug(cur, f"{n:02d}_{name}")
                     text = page_text(cur)
