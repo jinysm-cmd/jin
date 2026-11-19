@@ -67,7 +67,13 @@ def setup(rest_api_key: str, client_secret: str = "") -> None:
     if client_secret:
         data["client_secret"] = client_secret
     r = requests.post(TOKEN_URL, data=data, timeout=20)
-    r.raise_for_status()
+    if r.status_code != 200:
+        hint = ""
+        if r.status_code == 401 or "client" in r.text:
+            hint = ("\n→ Client Secret 이 켜져 있는데 입력하지 않았거나 틀린 경우가 대부분입니다."
+                    "\n  카카오 개발자 > 앱 > 플랫폼 키 > REST API 키 화면(또는 카카오 로그인 > 보안)의"
+                    "\n  '클라이언트 시크릿' 코드를 복사해서 setup 을 다시 실행하세요.")
+        raise SystemExit(f"카카오 토큰 발급 실패 ({r.status_code}): {r.text[:300]}{hint}")
     tok = r.json()
     tok.update(rest_api_key=rest_api_key, client_secret=client_secret,
                expires_at=time.time() + tok.get("expires_in", 0))
