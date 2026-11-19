@@ -200,6 +200,17 @@ def wait_counts(page, labels: list[str], max_wait_s: int = 30) -> None:
     log.warning("현황 숫자가 %d초 안에 다 뜨지 않았습니다. 인터넷이 느릴 수 있어요.", max_wait_s)
 
 
+def _on_dialog(d) -> None:
+    """알림창(alert)은 '확인'으로 닫고, '공람확인 하시겠습니까?' 같은 선택창(confirm)은 항상 '취소'.
+    → 공문을 읽기만 하고 공람 확인 처리는 하지 않는다."""
+    log.info("팝업 메시지(%s) %s: %s", d.type, "취소" if d.type in ("confirm", "prompt") else "닫음",
+             (d.message or "")[:60])
+    if d.type in ("confirm", "prompt", "beforeunload"):
+        d.dismiss()
+    else:
+        d.accept()
+
+
 def navigate(page, spec: dict, home_url: str):
     """spec 의 url/click 대로 이동해서 도착한 화면(새 창일 수도 있음)을 돌려준다."""
     cur = page
@@ -353,8 +364,8 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool,
         browser = p.chromium.launch(**launch)
         ctx = browser.new_context(locale="ko-KR", viewport={"width": 1400, "height": 1000})
         page = ctx.new_page()
-        page.on("dialog", lambda d: d.accept())  # '비밀번호 변경 안내' 같은 알림창 자동 닫기
-        ctx.on("page", lambda pg: pg.on("dialog", lambda d: d.accept()))
+        page.on("dialog", _on_dialog)
+        ctx.on("page", lambda pg: pg.on("dialog", _on_dialog))
         try:
             login(page, cfg, password)
             if debug:

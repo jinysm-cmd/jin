@@ -25,7 +25,8 @@ PAGES = {
     "/gongram?p=2": """<table><tr><td><a href="/doc4">회계 마감 안내</a></td><td>재무팀</td><td>26.11.18</td></tr>
       <tr><td><a href="/doc5">옛 공문</a></td><td>총무팀</td><td>2026-11-17</td></tr>
       </table><a href="/gongram?p=1">1</a> <a href="/gongram?p=2">2</a>""",
-    "/doc1": "각 학과는 2026. 11. 25.까지 교육과정 의견을 제출하시기 바랍니다.",
+    "/doc1": """각 학과는 2026. 11. 25.까지 교육과정 의견을 제출하시기 바랍니다.
+      <script>if (confirm('공람확인 하시겠습니까?')) fetch('/confirm');</script>""",
     "/doc2": "본관 3층 공사로 엘리베이터 운행을 중지합니다.",
     "/doc3": "음악·공연 분야 창작자에게 제작비를 지원하는 공모입니다.",
     "/doc4": "부서 예산 집행 마감을 안내합니다.",
@@ -36,6 +37,9 @@ PAGES = {
                  <tr><td>2027학년도 교육과정 개편안 제출 요청</td><td>교무처</td><td>2026-11-17</td></tr>
                  <tr><td>연구윤리 교육 이수 안내</td><td>산학협력단</td><td>2026-11-16</td></tr></table>""",
 }
+
+
+CONFIRMED = []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -56,6 +60,8 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGES["/login"] + "<p>실패</p>")
 
     def do_GET(self):  # noqa: N802
+        if self.path == "/confirm":
+            CONFIRMED.append(1)
         if self.path != "/login" and "s=1" not in (self.headers.get("Cookie") or ""):
             return self._html("", 302, [("Location", "/login")])
         self._html(PAGES.get(self.path, "not found"))
@@ -236,6 +242,7 @@ def test_gongram_list_since_yesterday_with_bodies(portal):
                       "창작지원 공모 안내", "회계 마감 안내"]  # 11/17 은 제외, 2쪽까지 넘어감
     bodies = {d["title"]: d["body"] for d in res["docs"]}
     assert "교육과정 의견" in bodies["2027 교육과정 개편 학과별 의견 제출 요청"]  # 새 창
+    assert CONFIRMED == []  # '공람확인 하시겠습니까?' 는 취소 → 확인 처리 안 됨
     assert "엘리베이터" in bodies["청사 보수공사 안내"]  # 같은 창 이동 후 목록으로 복귀
     assert "예산 집행" in bodies["회계 마감 안내"]  # 2쪽 공문
 
