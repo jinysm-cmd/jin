@@ -310,3 +310,14 @@ def test_then_url_inside_groupware_popup(portal):
                      "list": True, "open_items": False}]
     (res,) = brief.collect(cfg, "secret", **KW)
     assert len(res["docs"]) == 4 and not res.get("error")
+
+
+def test_range_deadline_and_snippet_skip_attachments():
+    t = dt.date(2026, 11, 19)
+    body = ("붙임-2026-2학기 성적 평점표 작성 및 제출 안내.pdf\n"
+            "1. 관련: 학사운영팀\n"
+            "2. 성적입력 기간: 2026. 11. 23.(월) ~ 12. 4.(금) 18:00\n")
+    assert summarize._due(body, t) == dt.date(2026, 12, 4)
+    assert summarize._snippet(body, ("성적",)).startswith("2. 성적입력 기간")
+    assert summarize._due("신청기간: 11. 20.(금) ~ 27.(금)", t) == dt.date(2026, 11, 27)
+    assert summarize._snippet("27년 1학기 신청 포스터.jpg", ("신청",)) == ""

@@ -214,16 +214,45 @@ def _date(y, m, d) -> dt.date | None:
         return None
 
 
-def _due(line: str, today: dt.date) -> dt.date | None:
-    m = DUE_FULL.search(line)
+DEADLINE_WORDS = ("기간", "마감", "기한", "제출", "신청", "입력", "접수", "회신", "정정", "까지")
+_MD = r"(?:(20\d{2})\s*[.\-/년]\s*)?(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*[일.]?\s*(?:\([^)]{1,3}\))?"
+RANGE = re.compile(_MD + r"\s*(?:\d{1,2}:\d{2}\s*)?[~∼～]\s*(?:" + _MD + r"|(\d{1,2})\s*[일.]?\s*(?:\([^)]{1,3}\))?)")
+
+
+def _ymd(y, m, d, today: dt.date) -> dt.date | None:
+    if y:
+        return _date(y, m, d)
+    got = _date(today.year, m, d)
+    if got and (today - got).days > 180:  # 12월에 '1/5' → 내년
+        got = _date(today.year + 1, m, d)
+    return got
+
+
+def _range_end(line: str, today: dt.date) -> dt.date | None:
+    """'2026. 11. 23.(월) ~ 12. 4.(금)', '11. 23. ~ 27.' 같은 기간의 끝날."""
+    m = RANGE.search(line)
+    if not m:
+        return None
+    y1, m1, d1, y2, m2, d2, d_only = m.groups()
+    if m2:
+        return _ymd(y2 or y1, m2, d2, today)
+    if d_only:
+        return _ymd(y1, m1, d_only, today)
+    return None
+
+
+def _due(text: str, today: dt.date) -> dt.date | None:
+    m = DUE_FULL.search(text)
     if m:
         return _date(*m.groups())
-    m = DUE_SHORT.search(line)
+    m = DUE_SHORT.search(text)
     if m:
-        d = _date(today.year, *m.groups())
-        if d and (today - d).days > 180:  # 12월에 '1/5까지' → 내년
-            d = _date(today.year + 1, *m.groups())
-        return d
+        return _ymd(None, *m.groups(), today)
+    ends = [e for ln in text.splitlines() if any(w in ln for w in DEADLINE_WORDS)
+            for e in [_range_end(ln, today)] if e]
+    if ends:  # 아직 안 지난 것 중 가장 빠른 마감, 없으면 가장 늦은 것
+        future = [e for e in ends if e >= today]
+        return min(future) if future else max(ends)
     return None
 
 
@@ -264,10 +293,18 @@ def _title(line: str) -> str:
     return re.sub(r"\s+", " ", best)[:80]
 
 
+ATTACH = re.compile(r"\.(pdf|hwpx?|jpe?g|png|gif|xlsx?|docx?|pptx?|zip)\b|^(붙임|첨부)", re.I)
+
+
 def _snippet(body: str, words) -> str:
-    for ln in body.splitlines():
-        ln = ln.strip()
-        if 10 <= len(ln) <= 200 and any(w in ln for w in words):
+    """본문에서 요약으로 보여줄 한 줄. 첨부파일 이름은 건너뛰고, 기간·마감이 적힌 줄을 먼저."""
+    lines = [ln.strip() for ln in body.splitlines()]
+    lines = [ln for ln in lines if 10 <= len(ln) <= 200 and not ATTACH.search(ln)]
+    for ln in lines:
+        if any(w in ln for w in DEADLINE_WORDS) and (FULL_DATE.search(ln) or RANGE.search(ln)):
+            return ln[:90]
+    for ln in lines:
+        if any(w in ln for w in words):
             return ln[:90]
     return ""
 
