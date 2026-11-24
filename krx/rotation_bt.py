@@ -73,7 +73,7 @@ def run(o, c, score: pd.DataFrame, cfg: RotCfg, index_close: pd.Series | None = 
     prev_i = None
     for k, d in enumerate(dates):
         i = o.index.get_loc(d)
-        if prev_i is not None and k % cfg.rebal == 0:
+        if prev_i is not None and (k - 1) % cfg.rebal == 0:
             row = S[prev_i]
             valid = ~np.isnan(row)
             target = []
