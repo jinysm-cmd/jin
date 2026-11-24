@@ -38,7 +38,8 @@ def wide(data: dict):
     return o, h, c_, v
 
 
-def score_panel(o, h, c, v, cfg: RotCfg) -> pd.DataFrame:
+def score_panel(o, h, c, v, cfg: RotCfg, extra: dict | None = None) -> pd.DataFrame:
+    """extra: {이름: (패널, 가중치)} 높을수록 좋은 추가 특성 (예: 수급)."""
     tv = c * v
     tv20 = tv.rolling(20, min_periods=20).mean()
     nbar = c.notna().cumsum()
@@ -50,6 +51,8 @@ def score_panel(o, h, c, v, cfg: RotCfg) -> pd.DataFrame:
         "ret5": (-(c / c.shift(5) - 1), cfg.w_ret5),
         "vol": (-c.pct_change(fill_method=None).rolling(60).std(), cfg.w_vol),
     }
+    for k, (f, w) in (extra or {}).items():
+        feats[k] = (f.reindex(index=c.index, columns=c.columns), w)
     sc = None
     for f, w in feats.values():
         if w == 0:
