@@ -1,7 +1,11 @@
-"""수급 + 가격 로테이션 (시가총액 상위 400 종목, 수급 데이터가 있는 종목만).
+"""수급 + 가격 로테이션.
+
+python krx_flow_rotation.py              # 현재 시총 상위 400 (생존 편향 큼)
+python krx_flow_rotation.py --pit        # 2017년 이후 한 번이라도 거래대금 100억 이상이었던 종목 (편향 작음)
 
 IS(2017-06~2021) 에서 각 수급 특성의 방향을 정하고, 같은 설정을 OOS(2022~) 에 그대로 적용한다.
 """
+import argparse
 import itertools
 from dataclasses import replace
 
@@ -29,8 +33,14 @@ def flow_panels(flows: dict, index) -> dict:
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pit", action="store_true")
+    args = ap.parse_args()
     uni = list_stocks().sort_values("market_value", ascending=False)
-    codes = list(uni["code"][:400])
+    if args.pit:
+        codes = open("data/krx/pit_universe.txt").read().split()
+    else:
+        codes = list(uni["code"][:400])
     flows = load_flows(codes, max_age_h=1e9)
     data = {k: v for k, v in load_all(codes).items() if k in flows and len(v)}
     o, h, c, v = rb.wide(data)
@@ -40,6 +50,11 @@ def main():
     for n, (a, b) in P.items():
         s = stats(k[a:b], pd.DataFrame())
         print(f"KOSPI {n:3s}  CAGR {s['cagr']:+6.1%}  MDD {s['mdd']:6.1%}  샤프 {s['sharpe']:.2f}")
+    el = ((c * v).rolling(20).mean() >= 1e10) & (c >= 1000) & (c.notna().cumsum() >= 250)
+    ew = (1 + c.pct_change(fill_method=None).where(el.shift(1)).mean(axis=1).fillna(0)).cumprod()
+    for n, (a, b) in P.items():
+        s = stats(ew[a:b], pd.DataFrame())
+        print(f"같은 종목 동일비중 {n:3s}  CAGR {s['cagr']:+6.1%}  MDD {s['mdd']:6.1%}  샤프 {s['sharpe']:.2f}")
     print()
 
     price_only = dict(w_mom=0, w_spike=0, w_ret5=0)  # 52주 고점 + 저변동성
@@ -61,7 +76,7 @@ def main():
                      **{f"{n}_{m}": r[n][m] for n in P for m in ("cagr", "mdd", "sharpe")}})
         print(f"{name:16s} N{top_n:2d} {rebal:2d}일 | IS CAGR {r['IS']['cagr']:+6.1%} MDD {r['IS']['mdd']:6.1%} 샤프 {r['IS']['sharpe']:.2f}"
               f" | OOS CAGR {r['OOS']['cagr']:+6.1%} MDD {r['OOS']['mdd']:6.1%} 샤프 {r['OOS']['sharpe']:.2f}", flush=True)
-    pd.DataFrame(rows).to_csv("krx_flow_rotation.csv", index=False)
+    pd.DataFrame(rows).to_csv("krx_flow_rotation_pit.csv" if args.pit else "krx_flow_rotation.csv", index=False)
 
 
 if __name__ == "__main__":
