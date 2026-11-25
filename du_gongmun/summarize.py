@@ -76,7 +76,28 @@ SYSTEM_TMPL = """당신은 동서울대학교 {dept} 교수의 아침 업무 비
 headline: 오늘 가장 먼저 챙길 것 한 줄."""
 
 
+SYSTEM_ALL = """당신은 동서울대학교 {dept} 교수의 아침 업무 비서입니다.
+학교 그룹웨어 공람함에 새로 들어온 공문(제목·목록 정보·본문)을 받아 **모든 공문을 빠짐없이** 정리합니다.
+아무것도 빼지 말고, skipped 는 항상 0 으로 둡니다.
+
+나누는 기준:
+- "제출": 교수 본인이나 학과가 제출·회신·신청·입력·작성·참석 등 직접 해야 하는 일이 있는 공문.
+  '각 학과', '전 학과', '학과장', '전체 교원', '전 교원' 대상이면 해당합니다.
+- "관련": 그 밖의 모든 공문(참고·안내·통보·학생 대상 안내 등).
+
+각 항목:
+- title: 공문 제목을 짧게(문서번호 같은 대괄호 번호는 빼도 됨). sender: 발신 부서(모르면 빈 문자열).
+- date: 접수/등록일, due: 제출·회신·신청 마감일(기간이면 끝나는 날). 둘 다 YYYY-MM-DD, 모르면 빈 문자열.
+- summary: 핵심 내용 한두 문장(무엇을, 누구 대상, 언제까지). 첨부파일 이름은 쓰지 마세요.
+- action: 교수가 할 일 한 문장(예: "12/4 18시까지 성적 입력"). 없으면 "참고".
+- urgent: 마감이 3일 이내이거나 지났으면 true.
+- 공문에 없는 내용은 지어내지 마세요.
+headline: 오늘 가장 먼저 챙길 것 한 줄."""
+
+
 def system_prompt(cfg: dict) -> str:
+    if not cfg.get("filter", False):  # 기본: 모든 공문 정리
+        return SYSTEM_ALL.format(dept=cfg.get("department", "실용음악학과"))
     return SYSTEM_TMPL.format(dept=cfg.get("department", "실용음악학과"),
                               keywords=", ".join(cfg.get("keywords") or DEFAULT_KEYWORDS),
                               topics=", ".join(cfg.get("topics") or DEFAULT_TOPICS))
@@ -317,6 +338,7 @@ def rules_docs(docs: list[dict], today: dt.date, cfg: dict) -> tuple[list[dict],
     skip = cfg.get("skip_words") or DEFAULT_SKIP
     dept = cfg.get("department", "실용음악학과")
     items, skipped = [], 0
+    keep_all = not cfg.get("filter", False)  # 기본: 아무것도 빼지 않음
     for d in docs:
         title = re.sub(r"\s+", " ", d["title"])[:80]
         text = f"{d['title']}\n{d['body']}"
@@ -324,10 +346,10 @@ def rules_docs(docs: list[dict], today: dt.date, cfg: dict) -> tuple[list[dict],
         all_dept = any(w in text for w in ALL_DEPT_WORDS) or any(w in text for w in topics)
         todo = any(w in text for w in TODO_WORDS)
         unrelated = any(w in d["title"] for w in skip)
-        if unrelated and not related:
+        if unrelated and not related and not keep_all:
             skipped += 1
             continue
-        if not (related or all_dept or todo or cfg.get("keep_all_by_default", True)):
+        if not (keep_all or related or all_dept or todo or cfg.get("keep_all_by_default", True)):
             skipped += 1
             continue
         due = _due(text, today)

@@ -15,8 +15,11 @@ username: "아이디"
 #   url:   그 화면 주소를 바로 열기 (로그인 후 주소창에서 복사)
 #   click: 로그인 직후 화면에서 차례로 누를 메뉴 글자
 # 둘 중 하나만 써도 되고, url로 연 뒤 click을 이어서 해도 됩니다.
-# 우리 학과 — 이 학과와 관련 없는 공문은 뺍니다
+# 우리 학과
 department: "실용음악학과"
+# filter: false → 들어온 공문을 모두 정리 (기본)
+# filter: true  → 아래 keywords/topics/skip_words 로 학과와 무관한 공문은 뺌
+filter: false
 keywords: ["실용음악", "음악", "예술", "공연", "보컬", "작곡", "연주", "실기", "콘서트",
            "음원", "저작권", "오디션", "문화", "콘텐츠"]
 # 예술 분야가 아니어도 남길 학과 운영 주제 (전 학과 해당 공문)
@@ -77,4 +80,4 @@ headless: true
 
 # 카톡 메시지의 '포털 열기' 버튼 주소, 최대 메시지 수(200자씩 나눠 보냄)
 link_url: "https://portal.du.ac.kr/"
-max_kakao_messages: 15
+max_kakao_messages: 30

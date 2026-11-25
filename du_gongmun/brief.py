@@ -463,7 +463,7 @@ def _md(s: str) -> str:
         return s
 
 
-SECTIONS = [("제출", "📝 해야 할 것 (제출·회신·신청)"), ("관련", "📌 알아야 할 공문")]
+SECTIONS = [("제출", "📝 해야 할 것 (제출·회신·신청)"), ("관련", "📌 그 밖의 공문")]
 
 
 def format_brief(summary: dict, today: dt.date, errors: list[str], counts: list[str] = (),
@@ -492,7 +492,7 @@ def format_brief(summary: dict, today: dt.date, errors: list[str], counts: list[
             if it.get("action") and it["action"] not in ("참고", "내용 확인"):
                 lines.append(f"   → {it['action']}")
     if not items:
-        lines += ["", "학과에서 처리할 새 공문이 없습니다. 👍"]
+        lines += ["", "새로 들어온 공문이 없습니다. 👍"]
     if summary.get("skipped"):
         lines += ["", f"(학과와 관련 없는 {summary['skipped']}건은 뺐습니다)"]
     if errors:

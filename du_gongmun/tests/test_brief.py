@@ -118,7 +118,7 @@ def test_format_and_chunk():
     assert "📝 해야 할 것 (제출·회신·신청) (1)" in text
     assert "🔴 교육과정 개편안 제출 ~11/20(금) [교무처]" in text
     assert "   학과별 교과목 변경안" in text and "   → 11/20까지 개편안 제출" in text
-    assert "📌 알아야 할 공문 (1)" in text and "일정" not in text.replace("못 읽은 화면: 일정", "")
+    assert "📌 그 밖의 공문 (1)" in text and "일정" not in text.replace("못 읽은 화면: 일정", "")
     assert "학과와 관련 없는 12건은 뺐습니다" in text
     assert "⚠️ 못 읽은 화면: 일정" in text
     parts = kakao.chunk(text * 5)
@@ -246,7 +246,7 @@ def test_gongram_list_since_yesterday_with_bodies(portal):
     assert "엘리베이터" in bodies["청사 보수공사 안내"]  # 같은 창 이동 후 목록으로 복귀
     assert "예산 집행" in bodies["회계 마감 안내"]  # 2쪽 공문
 
-    out = summarize.with_rules([res], dt.date(2026, 11, 19), {"department": "실용음악학과"})
+    out = summarize.with_rules([res], dt.date(2026, 11, 19), {"department": "실용음악학과", "filter": True})
     assert out["skipped"] == 2
     (todo,) = [it for it in out["items"] if it["kind"] == "제출"]
     assert todo["due"] == "2026-11-25"
@@ -275,11 +275,11 @@ def test_rules_keep_general_department_topics():
         {"title": "취업 특강 개최 안내", "date": "2026-11-18", "body": "재학생 대상 특강", "key": "b", "line": ""},
         {"title": "법인카드 사용 지침", "date": "2026-11-18", "body": "경리 담당자 참고", "key": "c", "line": ""},
     ]
-    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 19), {})
+    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 19), {"filter": True})
     kinds = {it["title"].split()[0]: it["kind"] for it in out["items"]}
     assert kinds == {"2026학년도": "제출", "취업": "관련"}
     assert out["skipped"] == 1
-    assert "졸업" in summarize.system_prompt({}) and "캡스톤" in summarize.system_prompt({})
+    assert "캡스톤" in summarize.system_prompt({"filter": True})
 
 
 def test_rules_keep_meetings_and_guidelines():
@@ -304,7 +304,7 @@ def test_relative_dates_and_real_list_titles():
               "대중문화사업단 2026 대중음악 비즈니스 인력양성 지원사업 프로그램 출석인정 협조 요청 출석인정 대상자 명단",
               "직원 인사발령 통보"]
     docs = [{"title": x, "date": "2026-11-18", "body": "", "key": str(i), "line": ""} for i, x in enumerate(titles)]
-    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], t, {})
+    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], t, {"filter": True})
     kinds = {it["title"][:10]: it["kind"] for it in out["items"]}
     assert kinds["2027학년도 시설"] == "제출" and kinds["2026학년도 실험"] == "제출"
     assert kinds["대중문화사업단 20"] == "제출"
@@ -328,3 +328,11 @@ def test_range_deadline_and_snippet_skip_attachments():
     assert summarize._snippet(body, ("성적",)).startswith("2. 성적입력 기간")
     assert summarize._due("신청기간: 11. 20.(금) ~ 27.(금)", t) == dt.date(2026, 11, 27)
     assert summarize._snippet("27년 1학기 신청 포스터.jpg", ("신청",)) == ""
+
+
+def test_default_keeps_every_doc():
+    titles = ["직원 인사발령 통보", "법인카드 사용 지침", "2026학년도 2학기 성적입력 기간 통보"]
+    docs = [{"title": x, "date": "2026-11-24", "body": "", "key": str(i), "line": ""} for i, x in enumerate(titles)]
+    out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 25), {})
+    assert out["skipped"] == 0 and len(out["items"]) == 3
+    assert "빠짐없이" in summarize.system_prompt({})
