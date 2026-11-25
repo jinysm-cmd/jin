@@ -127,9 +127,9 @@ def _prompt_body(pages: list[dict], today: dt.date) -> str:
             if not p["docs"]:
                 parts.append(f"=== {p['name']}: 새 공문 없음 ===")
             for i, d in enumerate(p["docs"], 1):
-                shot = pathlib.Path(d["shot"]).name if d.get("shot") else ""
+                names = ", ".join(pathlib.Path(x).name for x in d.get("shots") or [])
                 parts.append(f"=== {p['name']} 공문 {i} ===\n목록: {d['line']}\n"
-                             + (f"화면 캡처: {shot}\n" if shot else "")
+                             + (f"화면 캡처(위에서부터 순서대로): {names}\n" if names else "")
                              + f"본문(글자로 읽힌 부분):\n{d['body'] or '(없음)'}")
         else:
             parts.append(f"=== 화면: {p['name']} ({p['url']}) ===\n"
@@ -185,13 +185,13 @@ def _extract_json(text: str) -> dict:
 
 
 SHOT_NOTE = ("\n\n공문 본문은 문서 뷰어 안에 그림으로 그려져 있어 글자로 거의 읽히지 않습니다. "
-             "'화면 캡처' 파일이 있는 공문은 반드시 그 이미지 파일을 Read 도구로 열어 본문(수신, 제목, 내용, "
+             "'화면 캡처' 파일이 있는 공문은 반드시 그 이미지 파일들을(여러 장이면 모두, 순서대로) Read 도구로 열어 본문(수신, 제목, 내용, "
              "제출기한, 제출방법, 문의처)을 직접 읽고 정리하세요. 오른쪽의 공람자 목록은 내용이 아닙니다.")
 
 
 def _shots(pages: list[dict]) -> list[pathlib.Path]:
-    return [pathlib.Path(d["shot"]) for p in pages for d in p.get("docs", [])
-            if d.get("shot") and pathlib.Path(d["shot"]).exists()]
+    return [pathlib.Path(x) for p in pages for d in p.get("docs", [])
+            for x in d.get("shots") or [] if pathlib.Path(x).exists()]
 
 
 def with_claude_cli(pages: list[dict], today: dt.date, cli: str, cfg: dict) -> dict:

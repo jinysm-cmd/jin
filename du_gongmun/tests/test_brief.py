@@ -28,7 +28,8 @@ PAGES = {
     "/doc1": """각 학과는 2026. 11. 25.까지 교육과정 의견을 제출하시기 바랍니다.
       <script>if (confirm('공람확인 하시겠습니까?')) fetch('/confirm');</script>""",
     "/doc2": "본관 3층 공사로 엘리베이터 운행을 중지합니다.",
-    "/doc3": "음악·공연 분야 창작자에게 제작비를 지원하는 공모입니다.",
+    "/doc3": "음악·공연 분야 창작자에게 제작비를 지원하는 공모입니다." + "<p>내용</p>" * 150
+              + "<p>문의: 산학협력단</p>",
     "/doc4": "부서 예산 집행 마감을 안내합니다.",
     "/gw": """<a href="/approval">전자결재</a>""",
     "/approval": """<iframe src="/menu" width=800 height=600></iframe>""",
@@ -343,8 +344,8 @@ def test_doc_screenshots_reach_claude_cli(portal, tmp_path):
     cfg = _cfg(portal)
     cfg["pages"] = [{"name": "공람대기", "click": ["공람대기"], "list": True, "max_items": 2}]
     (res,) = brief.collect(cfg, "secret", **KW)
-    shots = [d["shot"] for d in res["docs"]]
-    assert len(shots) == 2 and all(pathlib.Path(s).exists() for s in shots)
+    shots = [x for d in res["docs"] for x in d["shots"]]
+    assert len(res["docs"]) == 2 and shots and all(pathlib.Path(s).exists() for s in shots)
 
     # 가짜 claude: 받은 인자와 작업 폴더의 파일 목록을 기록
     log = tmp_path / "args.txt"
@@ -356,6 +357,15 @@ def test_doc_screenshots_reach_claude_cli(portal, tmp_path):
     fake.chmod(0o755)
     summarize.with_claude_cli([res], dt.date(2026, 11, 19), str(fake), {})
     seen = log.read_text()
-    assert "--allowedTools Read" in seen and "doc01.png" in seen and "doc02.png" in seen
+    assert "--allowedTools Read" in seen and "doc01_1.png" in seen and "doc02_1.png" in seen
     prompt = (tmp_path / "prompt.txt").read_text()
-    assert "화면 캡처: doc01.png" in prompt and "Read 도구로 열어" in prompt
+    assert "doc01_1.png" in prompt and "Read 도구로 열어" in prompt
+
+
+def test_long_doc_is_captured_in_several_shots(portal):
+    cfg = _cfg(portal)
+    cfg["pages"] = [{"name": "공람대기", "click": ["공람대기"], "list": True}]
+    (res,) = brief.collect(cfg, "secret", **KW)
+    by = {d["title"]: d["shots"] for d in res["docs"]}
+    assert len(by["창작지원 공모 안내"]) >= 2      # 길어서 스크롤하며 여러 장
+    assert len(by["2027 교육과정 개편 학과별 의견 제출 요청"]) == 1  # 짧으면 한 장
