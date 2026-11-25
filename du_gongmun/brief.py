@@ -272,7 +272,7 @@ def _row_locator(page, row: dict):
     return None
 
 
-def open_row(page, row: dict) -> tuple[str, bool]:
+def open_row(page, row: dict, debug_tag: str = "") -> tuple[str, bool]:
     """행을 눌러 공문 본문을 읽는다. (본문, 목록 화면을 떠났는지) 를 돌려준다."""
     tr = _row_locator(page, row)
     if tr is None:
@@ -293,9 +293,13 @@ def open_row(page, row: dict) -> tuple[str, bool]:
         doc = ctx.pages[-1]
         _settle(doc)
         body = page_text(doc)
+        if debug_tag:  # 공문 창 화면/HTML 저장 (본문이 어디 있는지 확인용)
+            dump_debug(doc, debug_tag)
         doc.close()
         return body, False
     _settle(page)
+    if debug_tag:
+        dump_debug(page, debug_tag)
     old = set(before_text.splitlines())
     body = "\n".join(l for l in page_text(page).splitlines() if l not in old)
     return body, True
@@ -338,7 +342,7 @@ def read_list(page, spec: dict, home_url: str, since: dt.date, today: dt.date,
                     if pno_i > 1:
                         cur = click_text(cur, str(pno_i), exact_only=True)
                     at_page = pno_i
-                body, left = open_row(cur, r)
+                body, left = open_row(cur, r, f"{tag}_doc{len(docs) + 1}" if debug else "")
                 at_list = not left
             except Exception as e:
                 log.warning("공문 열기 실패 (%s): %s", r["title"][:30], e)
