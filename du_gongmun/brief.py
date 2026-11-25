@@ -31,6 +31,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 SERVICE = "du-gongmun"
 STATE_FILE = HERE / "state.json"
 DEBUG_DIR = HERE / "debug"
+SHOT_DIR = HERE / "shots"  # 공문 창 캡처 (본문이 문서 뷰어 그림이라 글자로 안 읽힐 때 Claude가 이미지로 읽음)
 MAX_PAGE_CHARS = 60_000
 WEEKDAYS = "월화수목금토일"
 
@@ -272,11 +273,22 @@ def _row_locator(page, row: dict):
     return None
 
 
-def open_row(page, row: dict, debug_tag: str = "") -> tuple[str, bool]:
+def _shot(pg, name: str) -> str:
+    try:
+        SHOT_DIR.mkdir(exist_ok=True)
+        path = SHOT_DIR / f"{name}.png"
+        pg.screenshot(path=str(path))
+        return str(path)
+    except Exception as e:
+        log.warning("공문 화면 캡처 실패: %s", e)
+        return ""
+
+
+def open_row(page, row: dict, debug_tag: str = "", shot_name: str = "") -> tuple[str, bool, str]:
     """행을 눌러 공문 본문을 읽는다. (본문, 목록 화면을 떠났는지) 를 돌려준다."""
     tr = _row_locator(page, row)
     if tr is None:
-        return "", False
+        return "", False, ""
     links = tr.locator("a")
     if links.count():
         target = max((links.nth(i) for i in range(min(links.count(), 5))),
@@ -292,17 +304,20 @@ def open_row(page, row: dict, debug_tag: str = "") -> tuple[str, bool]:
     if len(ctx.pages) > before_pages:  # 본문이 새 창으로 열림
         doc = ctx.pages[-1]
         _settle(doc)
+        doc.wait_for_timeout(2000)  # 문서 뷰어가 본문을 다 그릴 때까지
         body = page_text(doc)
+        shot = _shot(doc, shot_name) if shot_name else ""
         if debug_tag:  # 공문 창 화면/HTML 저장 (본문이 어디 있는지 확인용)
             dump_debug(doc, debug_tag)
         doc.close()
-        return body, False
+        return body, False, shot
     _settle(page)
+    shot = _shot(page, shot_name) if shot_name else ""
     if debug_tag:
         dump_debug(page, debug_tag)
     old = set(before_text.splitlines())
     body = "\n".join(l for l in page_text(page).splitlines() if l not in old)
-    return body, True
+    return body, True, shot
 
 
 def read_list(page, spec: dict, home_url: str, since: dt.date, today: dt.date,
@@ -332,7 +347,7 @@ def read_list(page, spec: dict, home_url: str, since: dt.date, today: dt.date,
     picked = picked[:max_items]
     docs, at_list, at_page = [], True, pno
     for pno_i, r in picked:
-        body = ""
+        body, shot = "", ""
         if spec.get("open_items", True):
             try:
                 if not at_list or at_page != pno_i:
@@ -342,13 +357,14 @@ def read_list(page, spec: dict, home_url: str, since: dt.date, today: dt.date,
                     if pno_i > 1:
                         cur = click_text(cur, str(pno_i), exact_only=True)
                     at_page = pno_i
-                body, left = open_row(cur, r, f"{tag}_doc{len(docs) + 1}" if debug else "")
+                body, left, shot = open_row(cur, r, f"{tag}_doc{len(docs) + 1}" if debug else "",
+                                            f"doc{len(docs) + 1:02d}")
                 at_list = not left
             except Exception as e:
                 log.warning("공문 열기 실패 (%s): %s", r["title"][:30], e)
                 at_list = False
         docs.append({"title": r["title"], "date": r["date"].isoformat(), "line": r["line"],
-                     "body": body[:6000], "key": doc_key(r)})
+                     "body": body[:6000], "key": doc_key(r), "shot": shot})
     if cur is not page:
         cur.close()
     return docs, total
@@ -359,6 +375,8 @@ def collect(cfg: dict, password: str, *, headless: bool, debug: bool,
     from playwright.sync_api import sync_playwright
 
     results = []
+    import shutil
+    shutil.rmtree(SHOT_DIR, ignore_errors=True)  # 지난번 캡처는 지움
     with sync_playwright() as p:
         launch = {"headless": headless}
         if cfg.get("browser_channel"):  # 예: "chrome" (맥에 설치된 크롬 사용)

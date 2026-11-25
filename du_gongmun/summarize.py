@@ -127,7 +127,10 @@ def _prompt_body(pages: list[dict], today: dt.date) -> str:
             if not p["docs"]:
                 parts.append(f"=== {p['name']}: 새 공문 없음 ===")
             for i, d in enumerate(p["docs"], 1):
-                parts.append(f"=== {p['name']} 공문 {i} ===\n목록: {d['line']}\n본문:\n{d['body'] or '(본문 못 읽음)'}")
+                shot = pathlib.Path(d["shot"]).name if d.get("shot") else ""
+                parts.append(f"=== {p['name']} 공문 {i} ===\n목록: {d['line']}\n"
+                             + (f"화면 캡처: {shot}\n" if shot else "")
+                             + f"본문(글자로 읽힌 부분):\n{d['body'] or '(없음)'}")
         else:
             parts.append(f"=== 화면: {p['name']} ({p['url']}) ===\n"
                          f"{p['text'] or '(읽기 실패: ' + p.get('error', '') + ')'}")
@@ -181,17 +184,33 @@ def _extract_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
+SHOT_NOTE = ("\n\n공문 본문은 문서 뷰어 안에 그림으로 그려져 있어 글자로 거의 읽히지 않습니다. "
+             "'화면 캡처' 파일이 있는 공문은 반드시 그 이미지 파일을 Read 도구로 열어 본문(수신, 제목, 내용, "
+             "제출기한, 제출방법, 문의처)을 직접 읽고 정리하세요. 오른쪽의 공람자 목록은 내용이 아닙니다.")
+
+
+def _shots(pages: list[dict]) -> list[pathlib.Path]:
+    return [pathlib.Path(d["shot"]) for p in pages for d in p.get("docs", [])
+            if d.get("shot") and pathlib.Path(d["shot"]).exists()]
+
+
 def with_claude_cli(pages: list[dict], today: dt.date, cli: str, cfg: dict) -> dict:
+    shots = _shots(pages)
     prompt = (
         system_prompt(cfg)
+        + (SHOT_NOTE if shots else "")
         + "\n\n아래 JSON 형식으로만 답하세요. 설명이나 코드블록 없이 JSON 하나만 출력합니다.\n"
         + json.dumps(SCHEMA, ensure_ascii=False)
         + "\n\n"
         + _prompt_body(pages, today)
     )
-    with tempfile.TemporaryDirectory() as empty:  # 빈 폴더에서 실행 (파일 접근할 것 없음)
-        r = subprocess.run([cli, "-p", "--output-format", "json"], input=prompt, text=True,
-                           capture_output=True, cwd=empty, timeout=600)
+    with tempfile.TemporaryDirectory() as work:  # 공문 캡처만 들어 있는 임시 폴더에서 실행
+        for sh in shots:
+            shutil.copy(sh, pathlib.Path(work) / sh.name)
+        cmd = [cli, "-p", "--output-format", "json"]
+        if shots:  # 캡처 이미지를 읽는 것만 허용
+            cmd += ["--allowedTools", "Read"]
+        r = subprocess.run(cmd, input=prompt, text=True, capture_output=True, cwd=work, timeout=900)
     if r.returncode != 0:
         raise RuntimeError(f"claude 실행 실패: {(r.stderr or r.stdout)[:300]}")
     out = json.loads(r.stdout)
@@ -201,6 +220,20 @@ def with_claude_cli(pages: list[dict], today: dt.date, cli: str, cfg: dict) -> d
 
 
 # ───────── Claude API (유료) ─────────
+def _api_content(pages: list[dict], today: dt.date):
+    import base64
+    shots = _shots(pages)
+    if not shots:
+        return _prompt_body(pages, today)
+    blocks = []
+    for sh in shots:
+        blocks.append({"type": "text", "text": f"화면 캡처: {sh.name}"})
+        blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                   "data": base64.standard_b64encode(sh.read_bytes()).decode()}})
+    blocks.append({"type": "text", "text": _prompt_body(pages, today) + SHOT_NOTE.replace("Read 도구로 열어", "보고")})
+    return blocks
+
+
 def with_api(pages: list[dict], today: dt.date, api_key: str, model: str, cfg: dict) -> dict:
     import anthropic
 
@@ -212,7 +245,7 @@ def with_api(pages: list[dict], today: dt.date, api_key: str, model: str, cfg: d
         fallbacks="default",
         system=system_prompt(cfg),
         output_config={"effort": "medium", "format": {"type": "json_schema", "schema": SCHEMA}},
-        messages=[{"role": "user", "content": _prompt_body(pages, today)}],
+        messages=[{"role": "user", "content": _api_content(pages, today)}],
     )
     if resp.stop_reason == "refusal":
         raise RuntimeError("Claude가 요약을 거절했습니다.")

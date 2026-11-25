@@ -336,3 +336,26 @@ def test_default_keeps_every_doc():
     out = summarize.with_rules([{"name": "공람대기", "docs": docs}], dt.date(2026, 11, 25), {})
     assert out["skipped"] == 0 and len(out["items"]) == 3
     assert "빠짐없이" in summarize.system_prompt({})
+
+
+def test_doc_screenshots_reach_claude_cli(portal, tmp_path):
+    import json
+    cfg = _cfg(portal)
+    cfg["pages"] = [{"name": "공람대기", "click": ["공람대기"], "list": True, "max_items": 2}]
+    (res,) = brief.collect(cfg, "secret", **KW)
+    shots = [d["shot"] for d in res["docs"]]
+    assert len(shots) == 2 and all(pathlib.Path(s).exists() for s in shots)
+
+    # 가짜 claude: 받은 인자와 작업 폴더의 파일 목록을 기록
+    log = tmp_path / "args.txt"
+    inner = {"headline": "h", "skipped": 0, "items": []}
+    (tmp_path / "out.json").write_text(json.dumps({"is_error": False, "result": json.dumps(inner)}))
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\necho \"$@\" > '{log}'\nls >> '{log}'\ncat > '{tmp_path}/prompt.txt'\n"
+                    f"cat '{tmp_path / 'out.json'}'\n")
+    fake.chmod(0o755)
+    summarize.with_claude_cli([res], dt.date(2026, 11, 19), str(fake), {})
+    seen = log.read_text()
+    assert "--allowedTools Read" in seen and "doc01.png" in seen and "doc02.png" in seen
+    prompt = (tmp_path / "prompt.txt").read_text()
+    assert "화면 캡처: doc01.png" in prompt and "Read 도구로 열어" in prompt
